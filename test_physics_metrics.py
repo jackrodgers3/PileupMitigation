@@ -33,9 +33,9 @@ import matplotlib as mpl
 
 # mpl.use("pdf")
 import matplotlib.pyplot as plt
-#import mplhep as hep
+import mplhep as hep
 
-#hep.set_style(hep.style.CMS)
+hep.set_style(hep.style.CMS)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(torch.cuda.is_available())
@@ -143,7 +143,7 @@ class Args(object):
 
     def __init__(self, model_type='Gated', do_boost=False, extralayers=False):
         self.model_type = model_type
-        self.num_layers = 3
+        self.num_layers = 2
         self.batch_size = 1
         self.hidden_dim = 20
         self.dropout = 0
@@ -182,9 +182,9 @@ def clusterJets(pt, eta, phi, ptcut=200., deltaR=0.8):
     event = np.column_stack((pt_wptcut, eta_wptcut, phi_wptcut, mass_wptcut))
     event.dtype = DTYPE_PTEPM
     sequence = cluster(event, R=deltaR, p=-1)
-    jets = sequence.inclusive_jets(ptmin=1)
+    #jets = sequence.inclusive_jets(ptmin=1)
     #charged only
-    #jets = sequence.inclusive_jets(ptmin=20)
+    jets = sequence.inclusive_jets(ptmin=300)
 
     return jets
 
@@ -647,7 +647,7 @@ def test(filelists, models={}):
 
 
 def main(modelname, filelists):
-    savefigdir = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/"
+    savefigdir = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/Baseline/"
     # load models
     args = Args()
     model_gated_boost = models.GNNStack(9, args.hidden_dim, 1, args)
@@ -994,7 +994,9 @@ def main(modelname, filelists):
 
 
 if __name__ == '__main__':
-    modelname = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/best_valid_model_nPU11_deeper.pt"
-    filelists = ["/depot/cms/users/jprodger/PUPPI/WtestjetsdR0.4/dataset1_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WtestjetsdR0.4/dataset2_graph_puppi_4000",
-    "/depot/cms/users/jprodger/PUPPI/WtestjetsdR0.4/dataset3_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WtestjetsdR0.4/dataset4_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WtestjetsdR0.4/dataset5_graph_puppi_4000"]
+    modelname = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/Baseline/best_valid_model_nPU11_deeper.pt"
+    filelists = ["/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset1_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset2_graph_puppi_4000",
+    "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset3_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset4_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset5_graph_puppi_4000",
+    "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset6_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset7_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset8_graph_puppi_4000",
+    "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset9_graph_puppi_4000"]
     main(modelname, filelists)
