@@ -19,9 +19,9 @@ import matplotlib
 from copy import deepcopy
 import os
 import matplotlib.pyplot as plt
-#import mplhep as hep
+import mplhep as hep
 
-#hep.set_style(hep.style.CMS)
+hep.set_style(hep.style.CMS)
 
 matplotlib.use("pdf")
 
@@ -65,7 +65,7 @@ def arg_parse():
                         pulevel=80,
                         training_path="/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset1_graph_puppi_4000",
                         validation_path="/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset1_graph_puppi_val_1000",
-                        save_dir="/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/",
+                        save_dir="/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/Baseline/",
                         )
 
     return parser.parse_args()
@@ -308,7 +308,7 @@ def train(dataset, dataset_validation, args, batchsize):
                     print("lowest valid loss " + str(valid_loss))
                     lowest_valid_loss = valid_loss
 
-                if count_event == 16000:
+                if count_event == 8000:
                     converge = True
                     break
 
@@ -501,6 +501,7 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
     
     filelists = []
     filelists.append(pathname)
+    
 
     mets_truth, performances_jet_CHS, performances_jet_puppi, mets_puppi, performances_jet_puppi_wcut, mets_puppi_wcut, performances_jet_pred, mets_pred, neu_weight, neu_puppiweight, chlv_weight, chpu_weight, chlv_puppiweight, chpu_puppiweight, njets_pf, njets_pred, njets_puppi, njets_truth, njets_CHS, pt_jets_pf, pt_jets_pred, pt_jets_puppi, pt_jets_truth, pt_jets_CHS, eta_jets_pf, eta_jets_pred, eta_jets_puppi, eta_jets_truth, eta_jets_CHS, phi_jets_pf, phi_jets_pred, phi_jets_puppi, phi_jets_truth, phi_jets_CHS, mass_jets_pf, mass_jets_pred, mass_jets_puppi, mass_jets_truth, mass_jets_CHS =phym.test(
         filelists, modelcolls)
