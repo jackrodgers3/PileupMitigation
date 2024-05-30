@@ -11,13 +11,10 @@ import argparse
 import torch
 import torch.nn as nn
 from torch_geometric.data import DataLoader
-sys.path.insert(1, "/depot/cms/users/jprodger/PUPPI/models/")
-import models2 as models
-sys.path.insert(1, "/depot/cms/users/jprodger/PUPPI/utils/")
-import utils2
-#sys.path.insert(1, "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/test_physics_metrics.py")
-import test_test_physics_metrics as phym
-from test_test_physics_metrics import Args
+import models
+import utils
+import test_physics_metrics as phym
+from test_physics_metrics import Args
 import matplotlib
 from copy import deepcopy
 import os
@@ -36,14 +33,16 @@ print(torch.cuda.is_available())
 
 def arg_parse():
     parser = argparse.ArgumentParser(description='GNN arguments.')
-    utils2.parse_optimizer(parser)
+    utils.parse_optimizer(parser)
 
     parser.add_argument('--model_type', type=str,
                         help='Type of GNN model.')
     parser.add_argument('--batch_size', type=int,
                         help='Training batch size')
-    parser.add_argument('--num_layers', type=int,
+    parser.add_argument('--num_enc_layers', type=int,
                         help='Number of graph conv layers')
+    parser.add_argument('--num_dec_layers', type=int,
+                        help='Number of decoder layers')
     parser.add_argument('--hidden_dim', type=int,
                         help='Training hidden size')
     parser.add_argument('--dropout', type=float,
@@ -66,29 +65,38 @@ def arg_parse():
                         help='number of LV particles')
     parser.add_argument('--num_select_PU', type=int,
                         help='number of PU particles')
+    parser.add_argument('--act_fn', type=str,
+                        help = 'activation function')
 
     parser.set_defaults(model_type='Gated',
-                        num_layers=6,
-                        batch_size=4,
-                        hidden_dim=33,
-                        dropout=0.3,
+                        num_enc_layers=5,
+                        num_dec_layers = 5,
+                        batch_size=1,
+                        hidden_dim=20,
+                        dropout=0,
                         opt='adam',
                         weight_decay=0,
-                        lr=5.405e-4,
+                        lr=0.0001,
                         pulevel=80,
-                        lamb = 1.77e-5,
-                        training_path="/depot/cms/users/jprodger/PUPPI/WjetsdR0.4/dataset1_graph_puppi_16000",
-                        validation_path="/depot/cms/users/jprodger/PUPPI/WjetsdR0.4/dataset1_graph_puppi_val_4000",
-                        save_dir="/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt27/Wjets/",
+                        lamb = 0.05,
+                        training_path=r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_1400",
+                        validation_path=r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_val_300",
+                        save_dir=r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\save_dir/",
                         jet_type = "W",
-                        num_select_LV = 1,
-                        num_select_PU = 23
+                        num_select_LV = 2,
+                        num_select_PU = 30,
+                        act_fn = 'relu'
                         )
 
     return parser.parse_args()
 
 
-def train(dataset, dataset_validation, args, batchsize):
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+
+
+def train(dataset, dataset_validation, trial, args):
     directory = args.save_dir
     # parent_dir = "/home/gpaspala/new_Pileup_GNN/Pileup_GNN/fast_simulation/"
     # path = os.path.join(parent_dir, directory)
@@ -114,24 +122,43 @@ def train(dataset, dataset_validation, args, batchsize):
         num_select_LV = 6
         num_select_PU = 282
     '''
+    args.dropout = trial.suggest_float("dropout", 0.05, 0.95)
     rotate_mask = 9
+    
+    args.num_select_LV = trial.suggest_int("num_select_LV", 1, 10)
+    args.num_select_PU = trial.suggest_int("num_select_PU", 10, 60)
+    
+    args.hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256, 512])
+    
+    args.lr = trial.suggest_float("lr", 1e-6, 1e-2, log=True)
+    
+    args.num_enc_layers = trial.suggest_int("num_enc_layers", 1, 6)
+    args.num_dec_layers = trial.suggest_int("num_dec_layers", 1, 6)
+    
+    args.lamb = trial.suggest_float("lamb", 1e-5, 1e-2, log=True)
+    
+    args.weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-1, log = True)
+    args.act_fn = trial.suggest_categorical("act_fn", ["relu", "leakyrelu"])
     
     phym.Args().hidden_dim = args.hidden_dim
     phym.Args().dropout = args.dropout
     phym.Args().lr = args.lr
     phym.Args().num_select_LV = args.num_select_LV
     phym.Args().num_select_PU = args.num_select_PU
-    phym.Args().num_layers = args.num_layers
+    phym.Args().num_enc_layers = args.num_enc_layers
+    phym.Args().num_dec_layers = args.num_dec_layers
     phym.Args().lamb = args.lamb
+    phym.Args().weight_decay = args.weight_decay
+    phym.Args().act_fn = args.act_fn
 
     generate_mask(dataset, rotate_mask, args.num_select_LV, args.num_select_PU)
     generate_mask(dataset_validation, 1, args.num_select_LV, args.num_select_PU)
 
-    training_loader = DataLoader(dataset, batch_size=batchsize)
-    validation_loader = DataLoader(dataset_validation, batch_size=batchsize)
+    training_loader = DataLoader(dataset, batch_size=args.batch_size)
+    validation_loader = DataLoader(dataset_validation, batch_size=args.batch_size)
 
     model = models.GNNStack(
-        dataset[0].num_feature_actual, args.hidden_dim, 1, args)
+        dataset[0].num_feature_actual, 1, args)
     
     '''
     n_gpu = torch.cuda.device_count()
@@ -140,9 +167,8 @@ def train(dataset, dataset_validation, args, batchsize):
         model = nn.DataParallel(model)
     '''
     model = model.to(device)
-    scheduler, opt = utils2.build_optimizer(args, model.parameters())
-
-    
+    opt = torch.optim.Adam(model.parameters(), lr = args.lr, weight_decay=args.weight_decay)
+    scheduler = torch.optim.lr_scheduler.StepLR(opt, 30, gamma=0.99)
 
     # train
     #
@@ -194,11 +220,11 @@ def train(dataset, dataset_validation, args, batchsize):
     valid_graph_PUPPIPtSigma = []
 
     count_event = 0
-    best_validation_quant = 1000
+    best_validation_metric = 1000.0
     converge = False
     converge_num_event = 0
     last_steady_event = 0
-    lowest_valid_loss = 10.0
+    lowest_valid_loss = 1000.0
 
     while converge == False:
         model.train()
@@ -206,7 +232,7 @@ def train(dataset, dataset_validation, args, batchsize):
 
         t = tqdm(total=len(training_loader), colour='green',
                  bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-        loss_avg = utils2.RunningAverage()
+        loss_avg = utils.RunningAverage()
         for batch in training_loader:
             count_event += 1
             epochs_train.append(count_event)
@@ -249,6 +275,7 @@ def train(dataset, dataset_validation, args, batchsize):
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+            scheduler.step()
 
             if math.isnan(cur_loss):
                 print("cur_loss ", cur_loss)
@@ -272,7 +299,7 @@ def train(dataset, dataset_validation, args, batchsize):
                     train_puppi_acc_neu, train_puppi_auc_neu, train_fig_name, train_SSLMassdiffMu, \
                     train_SSLMassSigma, train_PUPPIMassdiffMu, train_PUPPIMassSigma, train_SSLPtdiffMu, train_SSLPtSigma, \
                     train_PUPPIPtdiffMu, train_PUPPIPtSigma = test(
-                        training_loader, model, 0, count_event, args, modelcolls, args.training_path)
+                        training_loader, model, 0, count_event, args, modelcolls, args.training_path, trial)
 
                 valid_loss, valid_loss_hybrid, valid_acc, valid_auc, valid_auc_hybrid, \
                     valid_puppi_acc, valid_puppi_auc, \
@@ -280,7 +307,7 @@ def train(dataset, dataset_validation, args, batchsize):
                     valid_puppi_acc_neu, valid_puppi_auc_neu, valid_fig_name, valid_SSLMassdiffMu, \
                     valid_SSLMassSigma, valid_PUPPIMassdiffMu, valid_PUPPIMassSigma, valid_SSLPtdiffMu, valid_SSLPtSigma, \
                     valid_PUPPIPtdiffMu, valid_PUPPIPtSigma  = test(
-                        validation_loader, model, 1, count_event, args, modelcolls, args.validation_path)
+                        validation_loader, model, 1, count_event, args, modelcolls, args.validation_path, trial)
 
                 epochs_valid.append(count_event)
                 loss_graph_valid.append(valid_loss)
@@ -308,7 +335,7 @@ def train(dataset, dataset_validation, args, batchsize):
                 valid_fig_names.append(valid_fig_name)
 
                 train_graph_SSLMassdiffMu.append(train_SSLMassdiffMu)
-                train_graph_PUPPIMassdiffMu.append(train_PUPPIPtdiffMu)
+                train_graph_PUPPIMassdiffMu.append(train_PUPPIMassdiffMu)
                 train_graph_SSLMassSigma.append(train_SSLMassSigma)
                 train_graph_PUPPIMassSigma.append(train_PUPPIMassSigma)
                 train_graph_SSLPtdiffMu.append(train_SSLPtdiffMu)
@@ -325,20 +352,17 @@ def train(dataset, dataset_validation, args, batchsize):
                 valid_graph_PUPPIPtdiffMu.append(valid_PUPPIPtdiffMu)
                 valid_graph_PUPPIPtSigma.append(valid_PUPPIPtSigma)
                 
-                valid_quant = valid_SSLMassSigma / (1 - abs(valid_SSLMassdiffMu))
+                validation_metric = valid_SSLMassSigma / (1.0 - abs(valid_SSLMassdiffMu))
                 
-                
-                
-                if valid_quant < best_validation_quant:
-                    best_validation_quant = valid_quant
-                    print("model is saved in " + path + "/best_valid_model.pt")
-                    print(f"New validation quant: {best_validation_quant:.4f}")
+                if validation_metric < best_validation_metric:
+                    best_validation_metric = validation_metric
+                    print("model is saved in " + path + "/best_valid_model_"+str(trial.number)+".pt")
+                    print(f"New validation metric: {best_validation_metric:.4f}")
                     torch.save(model.state_dict(), path +
-                               "/best_valid_model.pt")
-
-                if valid_quant >= best_validation_quant:
+                               "/best_valid_model_"+str(trial.number)+".pt")
+                if validation_metric >= best_validation_metric:
                     print(
-                        "valid quant increase at event " + str(count_event) + " with validation quant " + str(valid_quant))
+                        "valid metric increase at event " + str(count_event) + " with validation metric " + str(validation_metric))
                     if last_steady_event == count_event - 1000:
                         converge_num_event += 1
                         if converge_num_event > 30:
@@ -351,14 +375,15 @@ def train(dataset, dataset_validation, args, batchsize):
                         last_steady_event = count_event
                     # print("converge num event " + str(converge_num_event))
                 else:
-                    print("lowest valid quant " + str(valid_quant))
-                    best_validation_quant = valid_quant
+                    print("lowest valid metric " + str(validation_metric))
+                    best_validation_metric = validation_metric
+                    
+                if valid_loss < lowest_valid_loss:
+                    lowest_valid_loss = valid_loss
 
-                
-                if count_event == 80000:
+                if count_event == 1392:
                     converge = True
                     break
-                
                 
 
         t.close()
@@ -367,13 +392,13 @@ def train(dataset, dataset_validation, args, batchsize):
     training_time = end - start
     print("training time " + str(training_time))
 
-    utils2.plot_training(epochs_train, epochs_valid, loss_graph_train,
+    utils.plot_training(epochs_train, epochs_valid, loss_graph_train,
                         loss_graph, auc_graph_train, train_accuracy_neu, auc_graph_train_puppi,
                         train_accuracy_puppi_neu,
                         loss_graph_valid, auc_graph_valid, valid_accuracy_neu, auc_graph_valid_puppi,
                         valid_accuracy_puppi_neu,
                         auc_graph_neu_train, auc_graph_train_puppi_neu,
-                        auc_graph_neu_valid, auc_graph_valid_puppi_neu, dir_name=args.save_dir)
+                        auc_graph_neu_valid, auc_graph_valid_puppi_neu, trial, dir_name=args.save_dir)
     plt.figure()
     plt.plot(epochs_valid, train_graph_SSLMassdiffMu, label = 'Semi-supervised_train_JetMass, $\mu$', linestyle = 'solid', linewidth = 1, color = 'g')
     plt.plot(epochs_valid, valid_graph_SSLMassdiffMu, label = 'Semi-supervised_valid_JetMass, $\mu$', linestyle = 'solid', linewidth = 1, color = 'b')
@@ -382,7 +407,7 @@ def train(dataset, dataset_validation, args, batchsize):
     plt.xlabel('Epochs')
     plt.ylabel('mean diff')
     plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_mass_diff_mean.pdf")
+    plt.savefig(args.save_dir + "/Jet_mass_diff_mean"+str(trial.number)+".pdf")
     plt.close()
 
     plt.figure()
@@ -393,7 +418,7 @@ def train(dataset, dataset_validation, args, batchsize):
     plt.xlabel('Epochs')
     plt.ylabel('mean diff')
     plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_pt_diff_mean.pdf")
+    plt.savefig(args.save_dir + "/Jet_pt_diff_mean"+str(trial.number)+".pdf")
     plt.close()
 
     plt.figure()
@@ -404,7 +429,7 @@ def train(dataset, dataset_validation, args, batchsize):
     plt.xlabel('Epochs')
     plt.ylabel('sigma diff')
     plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_mass_diff_sigma.pdf")
+    plt.savefig(args.save_dir + "/Jet_mass_diff_sigma"+str(trial.number)+".pdf")
     plt.close()
 
     plt.figure()
@@ -415,19 +440,19 @@ def train(dataset, dataset_validation, args, batchsize):
     plt.xlabel('Epochs')
     plt.ylabel('sigma diff')
     plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_pt_diff_sigma.pdf")
+    plt.savefig(args.save_dir + "/Jet_pt_diff_sigma"+str(trial.number)+".pdf")
     plt.close()
 
-    # utils2.plot_training(epochs_train, epochs_valid, loss_graph_train,
+    # utils.plot_training(epochs_train, epochs_valid, loss_graph_train,
     #                   loss_graph, auc_graph_train, train_accuracy_neu,
     #                   loss_graph_valid, auc_graph_valid, valid_accuracy_neu,
     #                   auc_graph_neu_train,
     #                   auc_graph_neu_valid, dir_name = args.save_dir
     #                   )
-    return lowest_valid_loss
+    return best_validation_metric
 
 
-def test(loader, model, indicator, epoch, args, modelcolls, pathname):
+def test(loader, model, indicator, epoch, args, modelcolls, pathname, trial):
     if indicator == 0:
         postfix = 'Train'
     elif indicator == 1:
@@ -523,37 +548,39 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
     pred_hybrid_all_neu = pred_hybrid_all[mask_all_neu == 1]
     puppi_all_neu = puppi_all[mask_all_neu == 1]
 
-    auc_chg = utils2.get_auc(label_all_chg, pred_all_chg)
-    auc_chg_hybrid = utils2.get_auc(label_all_chg, pred_hybrid_all_chg)
-    auc_chg_puppi = utils2.get_auc(label_all_chg, puppi_all_chg)
-    acc_chg = utils2.get_acc(label_all_chg, pred_all_chg)
-    acc_chg_puppi = utils2.get_acc(label_all_chg, puppi_all_chg)
+    auc_chg = utils.get_auc(label_all_chg, pred_all_chg)
+    auc_chg_hybrid = utils.get_auc(label_all_chg, pred_hybrid_all_chg)
+    auc_chg_puppi = utils.get_auc(label_all_chg, puppi_all_chg)
+    acc_chg = utils.get_acc(label_all_chg, pred_all_chg)
+    acc_chg_puppi = utils.get_acc(label_all_chg, puppi_all_chg)
 
-    auc_neu = utils2.get_auc(label_all_neu, pred_all_neu)
-    auc_neu_hybrid = utils2.get_auc(label_all_neu, pred_hybrid_all_neu)
-    auc_neu_puppi = utils2.get_auc(label_all_neu, puppi_all_neu)
-    acc_neu = utils2.get_acc(label_all_neu, pred_all_neu)
-    acc_neu_puppi = utils2.get_acc(label_all_neu, puppi_all_neu)
+    auc_neu = utils.get_auc(label_all_neu, pred_all_neu)
+    auc_neu_hybrid = utils.get_auc(label_all_neu, pred_hybrid_all_neu)
+    auc_neu_puppi = utils.get_auc(label_all_neu, puppi_all_neu)
+    acc_neu = utils.get_acc(label_all_neu, pred_all_neu)
+    acc_neu_puppi = utils.get_acc(label_all_neu, puppi_all_neu)
 
-    utils2.plot_roc([label_all_chg],
+    utils.plot_roc([label_all_chg],
                    [pred_all_chg],
                    legends=["prediction Chg"],
-                   postfix=postfix + "_test", dir_name=args.save_dir)
+                   postfix=postfix + "_test", dir_name=args.save_dir + 'prob_plots' + str(trial.number) + "/")
 
-    fig_name_prediction = utils2.plot_discriminator(epoch,
+    fig_name_prediction = utils.plot_discriminator(epoch,
                                                    [pred_all_chg[label_all_chg == 1], pred_all_chg[label_all_chg == 0],
                                                     pred_all_neu[label_all_neu == 1],
-                                                    pred_all_neu[label_all_neu == 0]],
+                                                    pred_all_neu[label_all_neu == 0]], trial.number,
                                                    legends=[
                                                        'LV Chg', 'PU Chg', 'LV Neu', 'PU Neu'],
-                                                   postfix=postfix + "_prediction", label='Prediction', dir_name=args.save_dir)
-    fig_name_puppi = utils2.plot_discriminator(epoch,
+                                                   postfix=postfix + "_prediction", label='Prediction',
+                                                   dir_name=args.save_dir + 'prob_plots' + str(trial.number) + "/")
+    fig_name_puppi = utils.plot_discriminator(epoch,
                                               [puppi_all_chg[label_all_chg == 1], puppi_all_chg[label_all_chg == 0],
                                                puppi_all_neu[label_all_neu == 1],
-                                               puppi_all_neu[label_all_neu == 0]],
+                                               puppi_all_neu[label_all_neu == 0]], trial.number,
                                               legends=[
                                                   'LV Chg', 'PU Chg', 'LV Neu', 'PU Neu'],
-                                              postfix=postfix + "_puppi", label='PUPPI Weight', dir_name=args.save_dir)
+                                              postfix=postfix + "_puppi", label='PUPPI Weight',
+                                              dir_name=args.save_dir + 'prob_plots' + str(trial.number) + "/")
     
     filelists = []
     filelists.append(pathname)
@@ -582,7 +609,7 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
     fig = plt.figure(figsize=(10, 8))
     mass_diff = np.array([getattr(perf, "mass_diff")
                          for perf in performances_jet_pred0])
-    print(mass_diff)
+
     plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='blue', linewidth=linewidth,
              density=True, label=r'Semi-supervised, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
     SSLMassdiffMu, SSLMassSigma = getStat(mass_diff)
@@ -605,7 +632,7 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
     plt.ylim(0, 3.6)
     plt.rc('legend', fontsize=fontsize)
     plt.legend()
-    plt.savefig(args.save_dir+"/prob_plots/Jet_mass_diff_"+postfix+str(epoch)+".pdf")
+    plt.savefig(args.save_dir+"/prob_plots"+str(trial.number)+"/Jet_mass_diff_"+postfix+str(epoch)+".pdf")
     plt.show()
 
     fig = plt.figure(figsize=(10, 8))
@@ -635,7 +662,7 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
     plt.rc('legend', fontsize=fontsize)
     plt.legend()
     plt.show()
-    plt.savefig(args.save_dir+"/prob_plots/Jet_pT_diff_"+postfix+str(epoch)+".pdf")
+    plt.savefig(args.save_dir+"/prob_plots"+str(trial.number)+"/Jet_pT_diff_"+postfix+str(epoch)+".pdf")
 
     return total_loss, total_loss_hybrid, acc_chg, auc_chg, auc_chg_hybrid, acc_chg_puppi, auc_chg_puppi, \
         acc_neu, auc_neu, auc_neu_hybrid, acc_neu_puppi, auc_neu_puppi, fig_name_prediction, SSLMassdiffMu, \
@@ -738,42 +765,83 @@ def generate_neu_mask(dataset, args):
         graph.random_mask_neu = random_mask_neu
 
     return dataset
-    
 
-#Baseline test
-def main():
-    args_end = arg_parse()
-    with open(args_end.training_path, "rb") as fp:
+
+def black_box_function(trial):
+    args = arg_parse()
+    with open(args.training_path, "rb") as fp:
         dataset = pickle.load(fp)
-    with open(args_end.validation_path, "rb") as fp:
+    with open(args.validation_path, "rb") as fp:
         dataset_validation = pickle.load(fp)
-    generate_neu_mask(dataset, args_end)
-    generate_neu_mask(dataset_validation, args_end)
+    generate_neu_mask(dataset, args)
+    generate_neu_mask(dataset_validation, args)
+    return train(dataset, dataset_validation, trial, args)
+
+
+#Using Optuna
+def main():
+    NUM_TRIALS = 100
+    args_end = arg_parse()
     mstart = timer()
-    train(dataset, dataset_validation, args_end, 1)
+    study = optuna.create_study(study_name='Bayesian Optimization with Optuna for Pileup Mitigation', direction="minimize", sampler = optuna.samplers.RandomSampler())
+    try:
+        for i in range(NUM_TRIALS):
+            os.rmdir(args_end.save_dir + "prob_plots"+str(i))
+    except FileNotFoundError:
+        pass
+    for i in range(NUM_TRIALS):
+        os.mkdir(args_end.save_dir + "prob_plots"+str(i))
+    study.optimize(black_box_function, n_trials=NUM_TRIALS)
+    trial = study.best_trial
+    print('Best values: {}'.format(trial.value))
+    print("Best hyperparameters: {}".format(trial.params))
+    s2 = str(trial.number)
     mend = timer()
     
     custom_arg = Args()
     
     #ONLY THING TO EDIT, REST IS PARAMETRIZED
-    custom_arg.hidden_dim = args_end.hidden_dim
-    custom_arg.dropout = args_end.dropout
-    custom_arg.lr = args_end.lr
-    custom_arg.num_select_LV = args_end.num_select_LV
-    custom_arg.num_select_PU = args_end.num_select_PU
-    custom_arg.num_layers = args_end.num_layers
-    custom_arg.lamb = args_end.lamb
+    custom_arg.hidden_dim = trial.params["hidden_dim"]
+    custom_arg.dropout = trial.params["dropout"]
+    custom_arg.lr = trial.params["lr"]
+    custom_arg.num_select_LV = trial.params["num_select_LV"]
+    custom_arg.num_select_PU = trial.params["num_select_PU"]
+    custom_arg.num_enc_layers = trial.params["num_enc_layers"]
+    custom_arg.num_dec_layers = trial.params["num_dec_layers"]
+    custom_arg.lamb = trial.params["lamb"]
+    custom_arg.weight_decay = trial.params["weight_decay"]
     ##################
     
     custom_arg.save_dir = args_end.save_dir
-    modelname = args_end.save_dir + 'best_valid_model.pt'
+    modelname = args_end.save_dir + 'best_valid_model_'+s2+'.pt'
     if args_end.jet_type == "W":
-        filelists = ["/depot/cms/users/jprodger/PUPPI/WjetsdR0.4/dataset1_graph_puppi_test_40004000"]
-    else:
-        filelists = ["/depot/cms/users/jprodger/PUPPI/ZjetsdR0.4/dataset1_graph_puppi_test_40004000"]
+        filelists = [r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_test_300",
+                     r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset2_graph_puppi_test_300",
+                     r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset3_graph_puppi_test_300",
+                     r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset4_graph_puppi_test_300"]
+    elif args_end.jet_type == "Z":
+        filelists = ["/depot/cms/users/jprodger/PUPPI/ZjetsdR0.4/dataset1_graph_puppi_test_20002000"]
+    elif args_end.jet_type == "Hbb":
+        filelists = ["/depot/cms/users/jprodger/PUPPI/High_Volume_Datasets/Hbb/dataset9_graph_puppi_test_45004500"]
     phym.main(modelname, filelists, custom_arg)
     mbotime = mend - mstart
     print("main time " + str(mbotime))
+    fig1 = optuna.visualization.plot_optimization_history(study, target_name = 'loss performance')
+    fig2 = optuna.visualization.plot_param_importances(study)
+    fig3 = optuna.visualization.plot_edf(study, target_name = 'loss performance')
+    fig4 = optuna.visualization.plot_contour(study, params=['hidden_dim', 'dropout'])
+    fig5 = optuna.visualization.plot_contour(study, params=['num_select_PU', 'num_select_LV'])
+    fig6 = optuna.visualization.plot_contour(study, params=['lr', 'num_layers'])
+    fig7 = optuna.visualization.plot_contour(study, params=['lamb', 'num_select_LV'])
+    #fig4 = optuna.visualization.plot_pareto_front(study, target_names=["MU", "SIGMA"])
+    fig1.write_image(file = args_end.save_dir + "opt_history4var.png", format = 'png')
+    fig2.write_image(file = args_end.save_dir + "param_importances4var.png", format='png')
+    fig3.write_image(file = args_end.save_dir + "edf4var.png", format='png')
+    fig4.write_image(file = args_end.save_dir + "contour1.png", format='png')
+    fig5.write_image(file = args_end.save_dir + "contour2.png", format='png')
+    fig6.write_image(file = args_end.save_dir + "contour3.png", format='png')
+    fig7.write_image(file = args_end.save_dir + "contour4.png", format='png')
+    #fig4.write_image(file = args_end.save_dir + "pareto.png", format='png')
 
 '''
 def main():

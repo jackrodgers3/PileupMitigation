@@ -10,6 +10,7 @@ import random
 from torch_geometric.data import Data
 import pickle
 from scipy.spatial import distance
+import sys
 
 
 np.random.seed(0)
@@ -38,7 +39,7 @@ def gen_dataframe(rfilename, num_event, num_start=0):
     for i in range(num_event):
         event = pfcands[i]
         selected_features = ['PF_eta', 'PF_phi', 'PF_pt',
-                             'PF_pdgId', 'PF_charge', 'PF_puppiWeight', 'PF_puppiWeightChg', 'PF_dz',
+                             'PF_pdgId', 'PF_charge', 'PF_puppiWeight', 'PF_puppiWeightNoLep', 'PF_dz',
                              'PF_fromPV'
                              ]
         pf_chosen = event[selected_features]
@@ -55,7 +56,7 @@ def gen_dataframe(rfilename, num_event, num_start=0):
         gen_chosen = event[selected_features]
         df_genparts = ak.to_dataframe(gen_chosen)
         # eliminate those with eta more than 2.5 and also neutrinos
-        selection = (abs(df_genparts['packedGenPart_eta']) < 2.5) & (abs(df_genparts['packedGenPart_pdgId']) != 12) & (
+        selection = (df_genparts['packedGenPart_eta'] < 2.5) & (abs(df_genparts['packedGenPart_pdgId']) != 12) & (
             abs(df_genparts['packedGenPart_pdgId']) != 14) & (abs(df_genparts['packedGenPart_pdgId']) != 16)
         df_genparts = df_genparts[selection]
         df_gen_list.append(df_genparts)
@@ -72,7 +73,7 @@ def prepare_dataset(rfilename, num_event, dR, num_start=0):
 
     df_pf_list, df_gen_list = gen_dataframe(rfilename, num_event, num_start)
 
-    PTCUT = 0.5
+    PTCUT = 0
 
     for num in range(len(df_pf_list)):
         if num % 10 == 0:
@@ -131,11 +132,9 @@ def prepare_dataset(rfilename, num_event, dR, num_start=0):
         puppiWeight = puppiWeight.type(torch.long)
         puppiWeight_one_hot = torch.nn.functional.one_hot(puppiWeight)
         puppiWeight_one_hot = puppiWeight_one_hot.type(torch.float32)
-        # columnsNamesArr = df_pfcands.columns.values
-        #ADDED
         index_puppi_chg = 5
         pWeightChg = node_features[:, index_puppi_chg].clone()
-        
+        # columnsNamesArr = df_pfcands.columns.values
         node_features = torch.cat(
             (node_features[:, 0:3], pdgId_one_hot, puppiWeight_one_hot), 1)
         #    (node_features[:, 0:3], pdgId_one_hot, node_features[:, -1:], puppiWeight_one_hot), 1)
@@ -192,40 +191,35 @@ def prepare_dataset(rfilename, num_event, dR, num_start=0):
         graph.num_classes = 2
         graph.GenPart_nump = gen_features
         graph.pWeight = pWeight
-        #ADDED
         graph.pWeightChg = pWeightChg
         data_list.append(graph)
 
     return data_list
 
 
-def main():
-
-    #split: train/test/valid = 4/6 / 1/6 / 1/6
-    
-    dR = 0.4
+def main(dR = 0.4):
     
     for i in range(1, 10):
         start = timer()
         
-        
-        iname = "/depot/cms/users/gpaspala/WJetsToQQ_HT-800toInf/output_"+str(i)+".root"
-        #iname = r"C:\Users\jackm\Downloads\output_1.root"
-        num_events_train = 4000
-        oname = "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset"+str(i)+"_graph_puppi_" + str(num_events_train)
+        iname = r'D:\Data\Research\PUPPI\WJetsToQQ_HT-800toInf/output_' + str(i) + '.root'
+        save_dir = r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4/'
+
+        num_events_train = 1400
+        oname = save_dir + "dataset"+str(i)+"_graph_puppi_" + str(num_events_train)
         dataset_train = prepare_dataset(iname, num_events_train, dR)
         # save outputs in pickle format
         with open(oname, "wb") as fp:
             pickle.dump(dataset_train, fp)
 
-        num_events_test = 1000
-        oname = "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset"+str(i)+"_graph_puppi_test_" + str(num_events_test)
-        dataset_test = prepare_dataset(iname, num_events_test, dR, num_events_train)
+        num_events_test = 300
+        oname = save_dir + "dataset"+str(i)+"_graph_puppi_test_" + str(num_events_test)
+        dataset_test = prepare_dataset(iname, num_events_test, dR, num_events_train,)
         with open(oname, "wb") as fp:
             pickle.dump(dataset_test, fp)
 
-        num_events_valid = 1000
-        oname = "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset"+str(i)+"_graph_puppi_val_" + str(num_events_valid)
+        num_events_valid = 300
+        oname = save_dir + "dataset"+str(i)+"_graph_puppi_val_" + str(num_events_valid)
         dataset_valid = prepare_dataset(
             iname, num_events_valid, dR, num_events_train + num_events_test)
         with open(oname, "wb") as fp:

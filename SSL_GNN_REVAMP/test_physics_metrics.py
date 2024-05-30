@@ -9,9 +9,7 @@ from pyjet import cluster, DTYPE_PTEPM
 import argparse
 import torch
 from torch_geometric.data import DataLoader
-sys.path.insert(1, "/depot/cms/users/jprodger/PUPPI/models/")
-import models as models
-sys.path.insert(1, "/depot/cms/users/jprodger/PUPPI/utils/")
+import models
 import utils
 import matplotlib
 from copy import deepcopy
@@ -48,8 +46,6 @@ def NormaliseDeltaPhi(dphis):
     dphis = np.where(dphis < -np.pi, dphis + 2*np.pi, dphis)
     return dphis
     
-
-
 
 def NormaliseDeltaRNew(detas, dphis):
     """
@@ -150,18 +146,21 @@ class Args(object):
 
     def __init__(self, model_type='Gated', do_boost=False, extralayers=False):
         self.model_type = model_type
-        self.num_layers = 5
+        self.num_enc_layers = 5
+        self.num_dec_layers = 5
         self.batch_size = 1
         self.hidden_dim = 0
         self.dropout = 0.1
+        self.act_fn = "relu"
         self.opt = 'adam'
         self.weight_decay = 0
         self.lr = 3e-4
         self.do_boost = do_boost
         self.extralayers = extralayers
-        self.save_dir = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt17/Wjets/"
+        self.save_dir = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt35/"
         self.num_select_LV = 2
         self.num_select_PU = 26
+        self.lamb = 0.05
 
 
 class PerformanceMetrics(object):
@@ -661,7 +660,7 @@ def main(modelname, filelists, custom_args):
     savefigdir = args.save_dir
     # load models
     
-    model_gated_boost = models.GNNStack(9, args.hidden_dim, 1, args)
+    model_gated_boost = models.GNNStack(9, 1, args)
     # model_load.load_state_dict(torch.load('best_valid_model_semi.pt'))
     model_gated_boost.load_state_dict(torch.load(modelname))
 
