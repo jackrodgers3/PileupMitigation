@@ -116,7 +116,7 @@ def get_jetidx(pt, eta, phi, jets):
     return jetidx
 
 
-def convert_data_to_jet(dataset, standardize=False):
+def convert_data2(dataset, precision = 0.001, edge_dR=0.8, standardize = False):
     reco_jet_pts = []
     reco_jet_etas = []
     reco_jet_phis = []
@@ -125,23 +125,15 @@ def convert_data_to_jet(dataset, standardize=False):
     truth_jet_etas = []
     truth_jet_phis = []
 
-    event_nums = []
+    jet_nums = []
     node_nums = []
 
     data_list = []
 
-    df = pd.DataFrame(columns=['node_num', 'event_num', 'pt', 'eta', 'phi', 'pt_truth', 'eta_truth', 'phi_truth'])
+    df = pd.DataFrame(columns=['jet_num', 'node_num', 'pt', 'eta', 'phi', 'pt_truth', 'eta_truth', 'phi_truth'])
 
-    counter = 0
-    # compile jet level data data
-    for i in range(len(dataset)):
-        # for i in range(100):
-        if dataset[i - 1].event_num < dataset[i].event_num and i != 0:
-            counter = 0
-        elif i == 0:
-            counter = 0
-        else:
-            counter += 1
+    jet_counter = 0
+    for i in tqdm(range(len(dataset)), desc='processing data'):
         pt = np.array(dataset[i].x[:, 2].cpu().detach())
         eta = np.array(dataset[i].x[:, 0].cpu().detach())
         phi = np.array(dataset[i].x[:, 1].cpu().detach())
@@ -150,22 +142,28 @@ def convert_data_to_jet(dataset, standardize=False):
         eta_truth = np.array(dataset[i].GenPart_nump[:, 0].cpu().detach())
         phi_truth = np.array(dataset[i].GenPart_nump[:, 1].cpu().detach())
 
-        jet_reco = clusterJets(pt, eta, phi)
-        jet_truth = clusterJets(pt_truth, eta_truth, phi_truth)
+        jets_truth = clusterJets(pt_truth, eta_truth, phi_truth)
 
-        reco_jet_pts.append(jet_reco[0].pt)
-        reco_jet_etas.append(jet_reco[0].eta)
-        reco_jet_phis.append(jet_reco[0].phi)
+        for j in range(len(jets_truth)):
+            if (i > 0 ) or (j > 0):
+                jet_counter += 1
+            node_counter = 0
+            for k in range(len(jets_truth[j].constituents_array())):
+                for l in range(len(pt)):
+                    if (abs(jets_truth[j].constituents_array()[k][1] - eta[l]) < precision) & (abs(jets_truth[j].constituents_array()[k][2] - phi[l]) < precision):
+                        reco_jet_pts.append(pt[l])
+                        reco_jet_etas.append(eta[l])
+                        reco_jet_phis.append(phi[l])
+                        truth_jet_pts.append(jets_truth[j].constituents_array()[k][0])
+                        truth_jet_etas.append(jets_truth[j].constituents_array()[k][1])
+                        truth_jet_phis.append(jets_truth[j].constituents_array()[k][2])
+                        jet_nums.append(jet_counter)
+                        node_nums.append(node_counter)
+                        node_counter += 1
+                        break
 
-        truth_jet_pts.append(jet_truth[0].pt)
-        truth_jet_etas.append(jet_truth[0].eta)
-        truth_jet_phis.append(jet_truth[0].phi)
-
-        event_nums.append(dataset[i].event_num)
-        node_nums.append(counter)
-
+    df['jet_num'] = jet_nums
     df['node_num'] = node_nums
-    df['event_num'] = event_nums
     df['pt'] = reco_jet_pts
     df['eta'] = reco_jet_etas
     df['phi'] = reco_jet_phis
@@ -173,19 +171,48 @@ def convert_data_to_jet(dataset, standardize=False):
     df['eta_truth'] = truth_jet_etas
     df['phi_truth'] = truth_jet_phis
 
+    n_unique_events = len(pd.unique(df['jet_num']))
+    edge_indices = []
+    for i in range(n_unique_events):
+        edges_source = []
+        edges_target = []
+        cur_df = df[df['jet_num'] == i]
+        node_nums = cur_df['node_num'].values
+        etas = cur_df['eta'].values
+        phis = cur_df['phi'].values
+        for j in range(len(node_nums)):
+            for k in range(len(node_nums)):
+                dR = np.sqrt((etas[k]-etas[j])**2 + (phis[k]-phis[j])**2)
+                if 0.1 <= dR <= edge_dR:
+                    edges_source.append(node_nums[j])
+                    edges_target.append(node_nums[k])
+                    edges_source.append(node_nums[k])
+                    edges_target.append(node_nums[j])
+        edge_index = np.array([edges_source, edges_target])
+        edge_index = torch.from_numpy(edge_index)
+        edge_index = edge_index.type(torch.long)
+        edge_indices.append(edge_index)
+
     if standardize:
-        df['pt'] = df['pt'].transform(lambda x: math.pow(x, 0.25))
-        df['pt_truth'] = df['pt_truth'].transform(lambda x: math.pow(x, 0.25))
+        # reverse standardization params
+        reco_pt_mean = df['pt'].mean()
+        reco_pt_std = df['pt'].std()
+        gen_pt_mean = df['pt_truth'].mean()
+        gen_pt_std = df['pt_truth'].std()
 
-    n_unique_events = len(pd.unique(df['event_num']))
-
-    # generating jet level regression graphs
+        # standardization for better gradient calculation; can probably put in loop
+        df['pt'] = (df['pt'] - df['pt'].mean()) / (df['pt'].std())
+        df['eta'] = (df['eta'] - df['eta'].mean()) / (df['eta'].std())
+        df['phi'] = (df['phi'] - df['phi'].mean()) / (df['phi'].std())
+        df['pt_truth'] = (df['pt_truth'] - df['pt_truth'].mean()) / (df['pt_truth'].std())
+        df['eta_truth'] = (df['eta_truth'] - df['eta_truth'].mean()) / (df['eta_truth'].std())
+        df['phi_truth'] = (df['phi_truth'] - df['phi_truth'].mean()) / (df['phi_truth'].std())
 
     for i in range(n_unique_events):
-        cur_df = df[df['event_num'] == i]
+        cur_df = df[df['jet_num'] == i]
         # make node features
         node_features = cur_df.drop(cur_df.loc[:, ['node_num']], axis=1).drop(
-            cur_df.loc[:, ['event_num']], axis=1).drop(
+            cur_df.loc[:, ['jet_num']], axis=1).drop(
             cur_df.loc[:, ['pt_truth']], axis=1).drop(
             cur_df.loc[:, ['eta_truth']], axis=1).drop(
             cur_df.loc[:, ['phi_truth']], axis=1).to_numpy()
@@ -197,17 +224,12 @@ def convert_data_to_jet(dataset, standardize=False):
         label = torch.from_numpy(label).view(-1)
         label = label.type(torch.float32)
 
-        # make edge index
-        node_nums = cur_df['node_num'].values
-        permutations = list(itertools.permutations(node_nums, 2))
-        edges_source = [e[0] for e in permutations]
-        edges_target = [e[1] for e in permutations]
-        edge_index = np.array([edges_source, edges_target])
-        edge_index = torch.from_numpy(edge_index)
-        edge_index = edge_index.type(torch.long)
-        graph = Data(x=node_features, edge_index=edge_index, y=label)
+        graph = Data(x=node_features, edge_index=edge_indices[i], y=label)
         data_list.append(graph)
-    return data_list
+    if standardize:
+        return data_list, [reco_pt_mean, reco_pt_std, gen_pt_mean, gen_pt_std]
+    else:
+        return data_list
 
 
 def arg_parse():
@@ -237,18 +259,30 @@ def arg_parse():
                         help='jet type to cluster')
     parser.add_argument('--act_fn', type=str,
                         help = 'activation function')
+    parser.add_argument('--n_heads', type=int,
+                        help='number of attention heads')
+    parser.add_argument('--n_layers', type=int,
+                        help='number of gcn layers')
+    parser.add_argument('--standardize', type=bool,
+                        help='standardization argument')
+    parser.add_argument('--precision', type=float,
+                        help='L1 error metric for eta-phi particle matching')
 
     parser.set_defaults(model_type='Gated',
                         num_enc_layers=5,
                         num_dec_layers = 5,
-                        hidden_dim=64,
+                        hidden_dim=128,
                         dropout=0.1,
-                        lr = 3e-4,
-                        epochs = 10,
+                        lr = 1e-3,
+                        epochs = 1,
                         pulevel=80,
                         save_dir=r'C:\Users\jackm\PycharmProjects\PileupMitigation\Regression_Task\output/',
                         jet_type = "W",
-                        act_fn = 'relu'
+                        act_fn = 'relu',
+                        n_heads = 4,
+                        n_layers = 2,
+                        standardize = True,
+                        precision = 0.1
                         )
 
     return parser.parse_args()
@@ -272,11 +306,9 @@ def train():
         dataset_test = pickle.load(f)
     f.close()
 
-    standardize = True
-
-    jet_dataset_train = convert_data_to_jet(dataset_train, standardize=standardize)
-    jet_dataset_valid = convert_data_to_jet(dataset_valid, standardize=standardize)
-    jet_dataset_test = convert_data_to_jet(dataset_test, standardize=standardize)
+    jet_dataset_train, _ = convert_data2(dataset_train, precision=args.precision, standardize=args.standardize)
+    jet_dataset_valid, _ = convert_data2(dataset_valid, precision=args.precision, standardize=args.standardize)
+    jet_dataset_test, st_params = convert_data2(dataset_test, precision=args.precision, standardize=args.standardize)
 
     train_dataloader = DataLoader(jet_dataset_train)
     valid_dataloader = DataLoader(jet_dataset_valid)
@@ -288,17 +320,23 @@ def train():
         "lr": args.lr,
         "hidden_dim": args.hidden_dim,
         "dropout": args.dropout,
-        "n_epochs": args.epochs
+        "n_epochs": args.epochs,
+        "n_layers": args.n_layers
     }
     in_channels = 3
     out_channels = 1
     wandb.init(
         project='jet_level_prediction',
         config= config,
-        notes = "trying gated model"
+        notes = "redoing data"
     )
     model = models.GCN(in_channels=in_channels, hidden_channels=args.hidden_dim, out_channels=out_channels,
+                       dropout=args.dropout, n_layers=args.n_layers)
+    '''
+    model = models.GAT(in_channels=in_channels, hidden_channels=args.hidden_dim, out_channels=out_channels,
+                       n_heads=args.n_heads,
                        dropout=args.dropout)
+    '''
     '''
     model = models.GNNStack(
         input_dim=in_channels,
@@ -309,7 +347,7 @@ def train():
 
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr = args.lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=15, gamma=0.99)
+    scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=15, gamma=0.999)
     criterion = nn.MSELoss(reduction='mean')
 
     best_valid_loss = float('inf')
@@ -326,7 +364,7 @@ def train():
             wandb.log({"train_loss": loss.item()})
             loss.backward()
             optimizer.step()
-            scheduler.step(batch_id)
+            scheduler.step()
         model.eval()
         avg_valid_loss = 0
         with torch.no_grad():
@@ -349,7 +387,7 @@ def train():
             torch.save(model.state_dict(), save_dir + 'best_model.pt')
 
     best_model = models.GCN(in_channels=in_channels, hidden_channels=args.hidden_dim, out_channels=out_channels,
-                       dropout=args.dropout)
+                       dropout=args.dropout, n_layers=args.n_layers)
     best_model.load_state_dict(torch.load(save_dir + 'best_model.pt'))
     predictions = []
     pf_recos = []
@@ -373,6 +411,7 @@ def train():
     torch.save(np.array(predictions), save_dir + 'predictions.pt')
     torch.save(np.array(truths), save_dir + 'truths.pt')
     torch.save(np.array(pf_recos), save_dir + 'pf_recos.pt')
+    torch.save(np.array(st_params), save_dir + 'st_params.pt')
     wandb.finish()
 
 
@@ -380,26 +419,30 @@ def plotting_predictions(save_dir):
     predictions = torch.load(save_dir + 'predictions.pt')
     truths = torch.load(save_dir + 'truths.pt')
     pf_recos = torch.load(save_dir + 'pf_recos.pt')
+    st_params = torch.load(save_dir + 'st_params.pt')
+
+    # restandardizing for plotting
+    predictions = (st_params[1] * predictions) + st_params[0]
+    pf_recos = (st_params[1] * pf_recos) + st_params[0]
+    truths = (st_params[3] * truths) + st_params[2]
+
     total_predictions = []
     total_truths = []
-    total_pfrs = []
-    n_bins = 30
     for i in range(len(predictions)):
         for j in range(len(predictions[i])):
-            '''
-            total_predictions.append(math.pow(10, predictions[i][j]))
-            total_truths.append(math.pow(10, truths[i][j]))
-            total_pfrs.append(math.pow(10, pf_recos[i][j]))
-            '''
-            total_predictions.append(math.pow(predictions[i][j], 4))
-            total_truths.append(math.pow(truths[i][j], 4))
-            total_pfrs.append(math.pow(pf_recos[i][j], 4))
+            total_predictions.append(predictions[i][j])
+            total_truths.append(truths[i][j])
+
+    n_bins = 30
     fig = plt.figure(figsize=(10, 8))
     _, bins, _ = plt.hist(x=total_truths, bins=n_bins, histtype='step', label='truth')
     _ = plt.hist(x=total_predictions, bins=bins, histtype='step', label='pred')
-    _ = plt.hist(x=total_pfrs, bins=bins, histtype='step', label='pf_reco')
     plt.legend()
+    plt.yscale('log')
+    plt.xscale('log')
     plt.savefig(save_dir + 'pt_comparison.png')
+    plt.cla()
+    plt.clf()
     plt.close(fig=fig)
 
 
