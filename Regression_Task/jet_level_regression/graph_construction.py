@@ -357,6 +357,8 @@ def r_gen_dataframe(rfilename, num_event, num_start=0):
         df_pfcands = df_pfcands[abs(df_pfcands['PF_eta']) < 2.5]
         df_pfcands = df_pfcands[df_pfcands['PF_pt'] > 0.5]
         df_pfcands.index = range(len(df_pfcands))
+        if i == 0:
+            print(df_pfcands)
         # df_pfcands['PF_pt'] = np.log(df_pfcands['PF_pt'])
 
         df_pf_list.append(df_pfcands)
@@ -416,6 +418,8 @@ def r_prepare_dataset(rfilename, num_event, dR, num_start=0):
     deltaRSetting = dR
     # deltaRSetting = 0.4
 
+    pre_data = []
+
     for num in range(len(df_pf_list)):
         if num % 10 == 0:
             print(f"processed {num} events")
@@ -451,10 +455,12 @@ def r_prepare_dataset(rfilename, num_event, dR, num_start=0):
             Neutral_index = np.where(df_pfcands['PF_charge'] == 0)[0]
             Charge_index = np.where(df_pfcands['PF_charge'] != 0)[0]
 
+            '''
             # label of samples
             label = df_pfcands.loc[:, ['PF_puppiWeight']].to_numpy()
             label = torch.from_numpy(label).view(-1)
             label = label.type(torch.long)
+            '''
 
             # node features
             node_features = df_pfcands.drop(df_pfcands.loc[:, ['PF_charge']], axis=1).drop(
@@ -462,6 +468,14 @@ def r_prepare_dataset(rfilename, num_event, dR, num_start=0):
 
             node_features = torch.from_numpy(node_features)
             node_features = node_features.type(torch.float32)
+
+            jet = clusterJets(
+                df_gencands['packedGenPart_pt'].to_numpy(),
+                df_gencands['packedGenPart_eta'].to_numpy(),
+                df_gencands['packedGenPart_phi'].to_numpy()
+                              )
+            label = torch.tensor([jet[0].pt]).view(-1)
+            label = label.type(torch.float32)
 
             # set the charge pdgId for one hot encoding later
             # ToDO: fix for muons and electrons
@@ -498,6 +512,7 @@ def r_prepare_dataset(rfilename, num_event, dR, num_start=0):
             # i(node_features[:, 0:3], pdgId_one_hot,node_features[:,5:6], puppiWeight_one_hot), 1)
             # (node_features[:, 0:4], pdgId_one_hot, puppiWeight_one_hot), 1)
             if num == 0:
+                print("NODE FEATURES: ", node_features)
                 print("pdgId dimensions: ", pdgId_one_hot.shape)
                 print("puppi weights dimensions: ", puppiWeight_one_hot.shape)
                 print("last dimention: ", node_features[:, -1:].shape)
@@ -541,6 +556,7 @@ def r_prepare_dataset(rfilename, num_event, dR, num_start=0):
             edge_index = edge_index.type(torch.long)
 
             graph = Data(x=node_features, edge_index=edge_index, y=label)
+
             graph.LV_index = LV_index
             graph.PU_index = PU_index
             graph.event_num = num
@@ -549,6 +565,7 @@ def r_prepare_dataset(rfilename, num_event, dR, num_start=0):
             graph.GenPart_nump = gen_features
             graph.pWeight = pWeight
             graph.pWeightchg = pWeightchg
+
             data_list.append(graph)
 
     return data_list
@@ -559,25 +576,25 @@ def main_regression(dR = 0.4):
 
     iname = r"D:\Data\Research\PUPPI\WJetsToQQ_HT-800toInf\output_1.root"
     num_events_train = 2800
-    oname = r"C:\Users\jackm\PycharmProjects\PileupMitigation\Regression_Task\data\train" + str(num_events_train)
+    oname = r"C:\Users\jackm\PycharmProjects\PileupMitigation\Regression_Task\jet_level_regression\dat\train" + str(num_events_train)
     dataset_train = r_prepare_dataset(iname, num_events_train, dR)
     # save outputs in pickle format
     with open(oname, "wb") as fp:
         pickle.dump(dataset_train, fp)
-
+    fp.close()
     num_events_valid = 600
-    oname = r"C:\Users\jackm\PycharmProjects\PileupMitigation\Regression_Task\data\valid" + str(num_events_valid)
+    oname = r"C:\Users\jackm\PycharmProjects\PileupMitigation\Regression_Task\jet_level_regression\dat\test" + str(num_events_valid)
     dataset_test = r_prepare_dataset(iname, num_events_valid, dR, num_events_train)
     with open(oname, "wb") as fp:
         pickle.dump(dataset_test, fp)
-
+    fp.close()
     num_events_test = 600
-    oname = r"C:\Users\jackm\PycharmProjects\PileupMitigation\Regression_Task\data\test" + str(num_events_test)
+    oname = r"C:\Users\jackm\PycharmProjects\PileupMitigation\Regression_Task\jet_level_regression\dat\valid" + str(num_events_test)
     dataset_valid = r_prepare_dataset(
         iname, num_events_test, dR, num_events_train + num_events_valid)
     with open(oname, "wb") as fp:
         pickle.dump(dataset_valid, fp)
-
+    fp.close()
     end = timer()
     program_time = end - start
     print("generating graph time " + str(program_time))
