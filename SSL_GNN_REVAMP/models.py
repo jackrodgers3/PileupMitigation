@@ -5,11 +5,21 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
+from torch import Tensor
+from typing import List, Optional,Union
 import torch_geometric.nn as pyg_nn
+from torch_geometric.data import Data
+import torch_geometric as pyg
 import torch_geometric.utils as pyg_utils
 import math
 from math import pi
 
+@torch.jit.script
+def refine(z:Optional[int])->int:
+    x = 0
+    assert z is not None
+    x += z
+    return x
 
 class Block(nn.Module):
     def __init__(self, hidden_dim, act_fn, dropout):
@@ -58,14 +68,14 @@ class GNNStack(torch.nn.Module):
         self.post_mp = nn.Sequential(*self.post_mp)
         self.post_da = nn.Sequential(*self.post_da)
         
-        self.grl = GradientReverseLayer()
+        #self.grl = GradientReverseLayer()
 
         self.dropout = args.dropout
         self.beta_one = nn.parameter.Parameter(torch.rand(1))
         self.num_enc_layers = args.num_enc_layers
         self.num_dec_layers = args.num_dec_layers
-
-        self.lamb = args.lamb
+        self.num_feature = 9
+        self.lamb = 0
 
     def build_conv_model(self, model_type):
         if model_type == 'GraphSage':
@@ -73,17 +83,17 @@ class GNNStack(torch.nn.Module):
         elif model_type == 'Gated':
             return Gated_model
 
-    def forward(self, data):
-        num_feature = data.num_feature_actual[0].item()
-        original_x = data.x[:, 0:num_feature]
-        train_mask = data.x[:, num_feature]
-        train_default = data.x[:, (num_feature + 1):]
+    def forward(self, x, edge_index):
+        num_feature = self.num_feature
+        original_x = x[:, 0:num_feature]
+        train_mask = x[:, num_feature]
+        train_default = original_x.clone()
 
         x = torch.transpose(original_x, 0, 1) * (1 - train_mask) + \
             torch.transpose(train_default, 0, 1) * train_mask
         x = torch.transpose(x, 0, 1)
 
-        edge_index = data.edge_index
+        edge_index = edge_index
         eta_pos = 0
         phi_pos = 1
         eta = x[:, eta_pos]
@@ -100,8 +110,8 @@ class GNNStack(torch.nn.Module):
             x = F.dropout(x, self.dropout, training=self.training)
 
         x_cl = self.post_mp(x)
-        x_da = self.grl(x)
-        x_da = self.post_da(x_da)
+        #x_da = self.grl(x)
+        x_da = self.post_da(x)
 
         x_cl = torch.sigmoid(x_cl)
         x_da = torch.sigmoid(x_da)
@@ -165,7 +175,7 @@ class GraphSage(pyg_nn.MessagePassing):
         return aggr_out
 
 
-class GradientReverseFunction(Function):
+"""class GradientReverseFunction(Function):
 
     @staticmethod
     def forward(ctx, x, coeff = 1.):
@@ -184,35 +194,43 @@ class GradientReverseLayer(nn.Module):
 
     def forward(self, x):
         return GradientReverseFunction.apply(x)
-
+"""
 
 class Gated_model(pyg_nn.MessagePassing):
+    propagate_type = {'x': Tensor}
     def __init__(self, in_channels, out_channels, normalize_embedding=True):
         super(Gated_model, self).__init__(aggr='mean')
         # last sclar = d_eta, d_phi, d_R, append x_i, x_j, x_g so * 3，+1 for log count
         new_x_input = 3 * (in_channels) + 3 + 1
+        Gated_model.jittable(self)
         self.x_dim = new_x_input
         self.lin_m2 = torch.nn.Linear(new_x_input, 1)
         # also append x and x_g, so + 2 * in_channels, +1 for log count in the global node
         self.lin_m5 = torch.nn.Linear(new_x_input + 2 * in_channels + 1, 1)
         self.lin_m5_g1 = torch.nn.Linear(in_channels, out_channels)
         self.lin_m5_g2 = torch.nn.Linear(new_x_input, out_channels)
-
-    def forward(self, x, edge_index, eta, phi):
+        self.node_count = torch.tensor(0).type(torch.float32)
+        self.pi = pi
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    def forward(self,
+                x:Tensor,
+                edge_index:Union[Tensor, pyg.typing.SparseTensor], 
+                eta:Tensor,
+                phi:Tensor,
+               ) -> Tensor:
         num_nodes = x.size(0)
         x = torch.cat((x, eta.view(-1, 1)), dim=1)
         x = torch.cat((x, phi.view(-1, 1)), dim=1)
         return self.propagate(edge_index, size=(num_nodes, num_nodes), x=x)
 
-    def message(self, x_j, x_i, edge_index, size, x):
-        self.node_count = torch.tensor(size[0]).type(torch.float32).to('cuda')
+    def message(self, x_j:Tensor, x_i:Tensor, edge_index:Optional[Tensor], size:List[Optional[int]], x:Tensor)-> Tensor:
+        self.node_count = torch.tensor(refine(size[0])).type(torch.float32).to(self.device)
         # eta at position 0
         dif_eta_phi = x_j[:, -2: x_j.size()[1]] - x_i[:, -2: x_i.size()[1]]
-
         # make sure delta within 2pi
-        indices = dif_eta_phi[:, 1] > pi
+        indices = dif_eta_phi[:, 1] > self.pi
         temp = torch.ceil(
-            (dif_eta_phi[:, 1][indices] - pi) / (2 * pi)) * (2 * pi)
+            (dif_eta_phi[:, 1][indices] - self.pi) / (2 * self.pi)) * (2 * self.pi)
         dif_eta_phi[:, 1][indices] = dif_eta_phi[:, 1][indices] - temp
 
         delta_r = torch.sum(torch.sqrt(dif_eta_phi ** 2), dim=1).reshape(-1, 1)
@@ -231,7 +249,7 @@ class Gated_model(pyg_nn.MessagePassing):
         x_j = x_j * M_2
         return x_j
 
-    def update(self, aggr_out, x):
+    def update(self, aggr_out:Tensor, x:Tensor)->Tensor:
         x = x[:, 0:-2]
         x_g = torch.mean(x, dim=0)
         log_count = torch.log(self.node_count)
@@ -243,4 +261,3 @@ class Gated_model(pyg_nn.MessagePassing):
         aggr_out = F.relu(aggr_out * self.lin_m5_g1(x) +
                           (1 - aggr_out) * self.lin_m5_g2(aggr_out_temp))
         return aggr_out
-

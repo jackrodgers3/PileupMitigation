@@ -141,6 +141,7 @@ def train(dataset, dataset_validation, args):
         dataset[0].num_feature_actual, 1, args)
 
     model = model.to(device)
+    m = torch.jit.script(model)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(opt, 30, gamma=0.99)
 
@@ -220,8 +221,8 @@ def train(dataset, dataset_validation, args):
                                      (num_feature + iter)].view(-1, 1),
                                      feature_with_mask[:, -num_feature:]), 1)
                 batch = batch.to(device)
-
-                pred, d_da = model.forward(batch)
+                batch.xa = batch.x[:, 0:(num_feature+1)]
+                pred, d_da = model.forward(batch.xa, batch.edge_index)
 
                 label = batch.y
                 label_da = batch.random_mask_neu[:, 0]
@@ -340,6 +341,7 @@ def train(dataset, dataset_validation, args):
                     print(f"New validation metric: {best_validation_metric:.4f}")
                     torch.save(model.state_dict(), path +
                                "/best_valid_model.pt")
+                    m.save("scriptmodule.pt")
                 wandb.log({"best_validation_metric": best_validation_metric})
 
                 if validation_metric >= best_validation_metric:
@@ -477,8 +479,9 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
             data.x = torch.cat(
                 (data.x[:, 0:num_feature], test_mask.view(-1, 1), data.x[:, -num_feature:]), 1)
             data = data.to(device)
+            data.x_ = data.x[:,0:(num_feature+1)]
             # max(dim=1) returns values, indices tuple; only need indices
-            pred, pred_hybrid = model.forward(data)
+            pred, pred_hybrid = model.forward(data.x_, data.edge_index)
             # puppi = data.x[:, data.num_feature_actual[0].item() - 1]
             puppi = data.pWeight
             label = data.y
