@@ -11,48 +11,72 @@ import math
 from math import pi
 
 
+class Block(nn.Module):
+    def __init__(self, hidden_dim, act_fn, dropout):
+        super(Block, self).__init__()
+        self.hidden_dim = hidden_dim
+        if act_fn == 'relu':
+            self.act_fn = nn.ReLU()
+        elif act_fn == 'leakyrelu':
+            self.act_fn = nn.LeakyReLU()
+        elif act_fn == 'gelu':
+            self.act_fn = nn.GELU()
+        self.dropout = dropout
+        self.main = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            self.act_fn,
+            nn.BatchNorm1d(hidden_dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, x):
+        return self.main(x)
+
+
 class GNNStack(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, args):
+    def __init__(self, input_dim, output_dim, args, disc=True):
         # since we do not need phi and eta in x
         input_dim = input_dim - 2
 
         super(GNNStack, self).__init__()
         conv_model = self.build_conv_model(args.model_type)
         self.convs = nn.ModuleList()
-        self.convs.append(conv_model(input_dim, hidden_dim))
-        assert (args.num_layers >= 1), 'Number of layers is not >=1'
-        for l in range(args.num_layers - 1):
-            self.convs.append(conv_model(hidden_dim, hidden_dim))
+        self.convs.append(conv_model(input_dim, args.hidden_dim))
+        assert (args.num_enc_layers >= 1) or (args.num_dec_layers >= 1), 'Number of layers is not >=1'
+        for l in range(args.num_enc_layers - 1):
+            self.convs.append(conv_model(args.hidden_dim, args.hidden_dim))
+        self.disc = disc
 
         # post-message-passing
-        self.post_mp = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(
-            ), nn.Dropout(args.dropout),
-            nn.Linear(hidden_dim, hidden_dim),nn.ReLU(
-            ),nn.Linear(hidden_dim, hidden_dim),nn.ReLU(
-            ),nn.Dropout(args.dropout),
-            nn.Linear(hidden_dim, hidden_dim),nn.ReLU(
-            ),nn.Linear(hidden_dim, hidden_dim),nn.ReLU(
-            ),nn.Linear(hidden_dim, output_dim),
-        )
-        
-        self.grl = GradientReverseLayer()
-        self.post_da = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(
-            ), nn.Dropout(args.dropout),
-            nn.Linear(hidden_dim, hidden_dim),nn.ReLU(
-            ),nn.Linear(hidden_dim, hidden_dim),nn.ReLU(
-            ),nn.Dropout(args.dropout),
-            nn.Linear(hidden_dim, hidden_dim),nn.ReLU(
-            ),
-            nn.Linear(hidden_dim, output_dim),
-        )
+        if self.disc:
+            self.post_mp = []
+            self.post_da = []
+            for j in range(args.num_dec_layers - 1):
+                self.post_mp.append(Block(args.hidden_dim, args.act_fn, args.dropout))
+                self.post_da.append(Block(args.hidden_dim, args.act_fn, args.dropout))
+            self.post_mp.append(nn.Linear(args.hidden_dim, output_dim))
+            self.post_da.append(nn.Linear(args.hidden_dim, output_dim))
 
-        self.dropout = args.dropout
-        self.beta_one = nn.parameter.Parameter(torch.rand(1))
-        self.num_layers = args.num_layers
 
-        self.lamb = args.lamb
+            self.post_da = nn.Sequential(*self.post_da)
+
+            self.grl = GradientReverseLayer()
+
+            self.dropout = args.dropout
+            self.beta_one = nn.parameter.Parameter(torch.rand(1))
+            self.num_enc_layers = args.num_enc_layers
+            self.num_dec_layers = args.num_dec_layers
+
+            self.lamb = args.lamb
+        else:
+            self.post_mp = []
+            for j in range(args.num_dec_layers - 1):
+                self.post_mp.append(Block(args.hidden_dim, args.act_fn, args.dropout))
+            self.post_mp.append(nn.Linear(args.hidden_dim, output_dim))
+            self.post_mp = nn.Sequential(*self.post_mp)
+            self.dropout = args.dropout
+            self.num_enc_layers = args.num_enc_layers
+            self.num_dec_layers = args.num_dec_layers
 
     def build_conv_model(self, model_type):
         if model_type == 'GraphSage':
@@ -61,14 +85,17 @@ class GNNStack(torch.nn.Module):
             return Gated_model
 
     def forward(self, data):
-        num_feature = data.num_feature_actual[0].item()
-        original_x = data.x[:, 0:num_feature]
-        train_mask = data.x[:, num_feature]
-        train_default = data.x[:, (num_feature + 1):]
+        if self.disc:
+            num_feature = data.num_feature_actual[0].item()
+            original_x = data.x[:, 0:num_feature]
+            train_mask = data.x[:, num_feature]
+            train_default = data.x[:, (num_feature + 1):]
 
-        x = torch.transpose(original_x, 0, 1) * (1 - train_mask) + \
-            torch.transpose(train_default, 0, 1) * train_mask
-        x = torch.transpose(x, 0, 1)
+            x = torch.transpose(original_x, 0, 1) * (1 - train_mask) + \
+                torch.transpose(train_default, 0, 1) * train_mask
+            x = torch.transpose(x, 0, 1)
+        else:
+            x = data.x
 
         edge_index = data.edge_index
         eta_pos = 0
@@ -76,26 +103,28 @@ class GNNStack(torch.nn.Module):
         eta = x[:, eta_pos]
         phi = x[:, phi_pos]
         # x = x[:, 2:-1]
+        x[:, 2] = torch.log10(x[:, 2])
         x = x[:, 2:]
 
         # x = self.before_mp(x)
 
         for layer in self.convs:
-            x = layer(x, edge_index, eta, phi)
-            # x = self.batchnorm(x)
-            x = F.relu(x)
-            x = F.dropout(x, self.dropout, training=self.training)
+            x = F.dropout(F.leaky_relu(layer(x, edge_index, eta, phi)), p=self.dropout)
 
-        x_cl = self.post_mp(x)
-        x_da = self.grl(x)
-        x_da = self.post_da(x_da)
+        if self.disc:
+            x_cl = self.post_mp(x)
+            x_da = self.grl(x)
+            x_da = self.post_da(x_da)
 
-        x_cl = torch.sigmoid(x_cl)
-        x_da = torch.sigmoid(x_da)
+            x_cl = torch.sigmoid(x_cl)
+            x_da = torch.sigmoid(x_da)
 
-        return x_cl, x_da
+            return x_cl, x_da
+        else:
+            x_dec = self.post_mp(x)
+            return x_dec
 
-    def loss(self, pred, label, domain_discrimiant, domain_label):
+    def loss(self, pred, label, domain_discriminant, domain_label):
         # loss = nn.CrossEntropyLoss()
         """
         weight = torch.zeros_like(label)
@@ -103,10 +132,15 @@ class GNNStack(torch.nn.Module):
         weight[label == 0] = 0.2
         """
         loss = nn.BCELoss()
-        eps = 1e-10
+        eps = 1e-9
         temp = loss(pred + eps, label)
-        temp_da = loss(domain_discrimiant + eps, domain_label)
+        temp_da = loss(domain_discriminant + eps, domain_label)
         return temp + self.lamb*temp_da
+
+    def loss_reco(self, pred, label):
+        loss = nn.MSELoss()
+        temp = loss(pred, label)
+        return temp
 
 
 class GraphSage(pyg_nn.MessagePassing):
@@ -151,6 +185,7 @@ class GraphSage(pyg_nn.MessagePassing):
 
         return aggr_out
 
+
 class GradientReverseFunction(Function):
 
     @staticmethod
@@ -170,6 +205,7 @@ class GradientReverseLayer(nn.Module):
 
     def forward(self, x):
         return GradientReverseFunction.apply(x)
+
 
 class Gated_model(pyg_nn.MessagePassing):
     def __init__(self, in_channels, out_channels, normalize_embedding=True):
@@ -228,3 +264,4 @@ class Gated_model(pyg_nn.MessagePassing):
         aggr_out = F.relu(aggr_out * self.lin_m5_g1(x) +
                           (1 - aggr_out) * self.lin_m5_g2(aggr_out_temp))
         return aggr_out
+

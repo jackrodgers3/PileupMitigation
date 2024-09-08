@@ -94,10 +94,7 @@ class GNNStack(torch.nn.Module):
         # x = self.before_mp(x)
 
         for layer in self.convs:
-            x = layer(x, edge_index, eta, phi)
-            # x = self.batchnorm(x)
-            x = F.relu(x)
-            x = F.dropout(x, self.dropout, training=self.training)
+            x = F.dropout(F.leaky_relu(layer(x, edge_index, eta, phi)), p=self.dropout)
 
         x_cl = self.post_mp(x)
         x_da = self.grl(x)

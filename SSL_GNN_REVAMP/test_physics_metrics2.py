@@ -138,7 +138,6 @@ def generate_neu_mask(dataset):
     return dataset
 
 
-
 class Args(object):
     """
     arguments for loading models
@@ -146,21 +145,21 @@ class Args(object):
 
     def __init__(self, model_type='Gated', do_boost=False, extralayers=False):
         self.model_type = model_type
-        self.num_enc_layers = 5
-        self.num_dec_layers = 5
+        self.num_enc_layers = 4
+        self.num_dec_layers = 2
         self.batch_size = 1
-        self.hidden_dim = 0
+        self.hidden_dim = 256
         self.dropout = 0.1
-        self.act_fn = "relu"
+        self.act_fn = "leakyrelu"
         self.opt = 'adam'
         self.weight_decay = 0
-        self.lr = 3e-4
+        self.lr = 0.0001
         self.do_boost = do_boost
         self.extralayers = extralayers
-        self.save_dir = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt35/"
+        self.save_dir = r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\save_dir/"
         self.num_select_LV = 2
-        self.num_select_PU = 26
-        self.lamb = 0.05
+        self.num_select_PU = 30
+        self.lamb = 0.005
 
 
 class PerformanceMetrics(object):
@@ -182,7 +181,6 @@ def clusterJets(pt, eta, phi, ptcut=0.5, deltaR=0.8):
     with pyjet clustering algo
     """
     # cleaning zero pt-ed objects
-    deltaR=0.8
     pt_wptcut = pt[pt > ptcut]
     eta_wptcut = eta[pt > ptcut]
     phi_wptcut = phi[pt > ptcut]
@@ -473,7 +471,11 @@ def postProcessing(data, preds):
             predcopyA[charge_index] = puppi[charge_index]
         
         pt_pred = pt * predcopyA
-        jets_pred = clusterJets(pt_pred,  eta, phi)
+        print("pt")
+        print(pt)
+        print("predcopyA")
+        print(predcopyA)
+        jets_pred = clusterJets(pt_pred, eta, phi)
         njets_pred, pt_jets_pred, eta_jets_pred, phi_jets_pred, mass_jets_pred = ExtractJet(jets_pred)
         performance_jet_pred = compareJets(jets_truth, jets_pred)
 
@@ -482,10 +484,8 @@ def postProcessing(data, preds):
 
         performances_jet_pred.append(performance_jet_pred)
         mets_pred.append(met_pred)
-    
-    
 
-    return met_truth,performances_jet_CHS, performances_jet_puppi, met_puppi, performances_jet_puppi_wcut, met_puppi_wcut, performances_jet_pred, mets_pred, neu_pred, neu_puppi, chlv_pred, chpu_pred, chlv_puppi, chpu_puppi, njets_pf, njets_pred, njets_puppi, njets_truth, njets_CHS, pt_jets_pf, pt_jets_pred, pt_jets_puppi, pt_jets_truth, pt_jets_CHS, eta_jets_pf, eta_jets_pred, eta_jets_puppi, eta_jets_truth, eta_jets_CHS, phi_jets_pf, phi_jets_pred, phi_jets_puppi, phi_jets_truth, phi_jets_CHS, mass_jets_pf, mass_jets_pred, mass_jets_puppi, mass_jets_truth, mass_jets_CHS
+    return met_truth, performances_jet_CHS, performances_jet_puppi, met_puppi, performances_jet_puppi_wcut, met_puppi_wcut, performances_jet_pred, mets_pred, neu_pred, neu_puppi, chlv_pred, chpu_pred, chlv_puppi, chpu_puppi, njets_pf, njets_pred, njets_puppi, njets_truth, njets_CHS, pt_jets_pf, pt_jets_pred, pt_jets_puppi, pt_jets_truth, pt_jets_CHS, eta_jets_pf, eta_jets_pred, eta_jets_puppi, eta_jets_truth, eta_jets_CHS, phi_jets_pf, phi_jets_pred, phi_jets_puppi, phi_jets_truth, phi_jets_CHS, mass_jets_pf, mass_jets_pred, mass_jets_puppi, mass_jets_truth, mass_jets_CHS
 
 
 def test(filelists, models={}):
@@ -576,7 +576,6 @@ def test(filelists, models={}):
                     pred = model.forward(data)
                     # print("pred here: ", pred)
                     preds.append(pred)
-
                 met_truth, perfs_jet_CHS, perfs_jet_puppi, met_puppi, perfs_jet_puppi_wcut, met_puppi_wcut, perfs_jet_pred, mets_fromF_pred, neus_pred, neus_puppi, chlvs_pred, chpus_pred, chlvs_puppi, chpus_puppi, Njets_pf, Njets_pred, Njets_puppi, Njets_truth, Njets_CHS, Pt_jets_pf, Pt_jets_pred, Pt_jets_puppi, Pt_jets_truth, Pt_jets_CHS, Eta_jets_pf, Eta_jets_pred, Eta_jets_puppi, Eta_jets_truth, Eta_jets_CHS, Phi_jets_pf, Phi_jets_pred, Phi_jets_puppi, Phi_jets_truth, Phi_jets_CHS, Mass_jets_pf, Mass_jets_pred, Mass_jets_puppi, Mass_jets_truth, Mass_jets_CHS = postProcessing(
                     data, preds)
                 # perfs_jet_puppi, perfs_jet_puppi_wcut, perfs_jet_pred, perfs_jet_pred2, met_truth, met_puppi, met_puppi_wcut, met_pred, met_pred2 = postProcessing(data, preds)
@@ -693,7 +692,7 @@ def main(modelname, filelists, custom_args):
     fig = plt.figure(figsize=(10, 8))
     mass_diff = np.array([getattr(perf, "mass_diff")
                          for perf in performances_jet_pred0])
-    print(mass_diff)
+    #print(mass_diff)
     plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='blue', linewidth=linewidth,
              density=True, label=r'Semi-supervised, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
     mass_diff = np.array([getattr(perf, "mass_diff")
@@ -840,7 +839,7 @@ def main(modelname, filelists, custom_args):
     chpu_weight_total = np.array(chpu_weight)
     chlv_puweight_total = np.array(chlv_puppiweight)
     chpu_puweight_total = np.array(chpu_puppiweight)
-    print(chlv_weight_total[:100])
+    #print(chlv_weight_total[:100])
     neutral_weight_total = np.array(neu_weight)
     plt.hist(neutral_weight_total, bins=40, range=(0, 1), histtype='step', color='blue', linewidth=linewidth,
               density=True, label=r'Neutral particle weight')
@@ -1004,4 +1003,12 @@ def main(modelname, filelists, custom_args):
 
 
 if __name__ == '__main__':
-    pass
+    modelname = r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\save_dir\best_valid_model.pt'
+    filelists = [
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_test_300',
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset2_graph_puppi_test_300',
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset3_graph_puppi_test_300',
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset4_graph_puppi_test_300'
+    ]
+    custom_args = Args()
+    main(modelname, filelists, custom_args)

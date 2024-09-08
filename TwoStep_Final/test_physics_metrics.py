@@ -9,9 +9,7 @@ from pyjet import cluster, DTYPE_PTEPM
 import argparse
 import torch
 from torch_geometric.data import DataLoader
-sys.path.insert(1, "/depot/cms/users/jprodger/PUPPI/models/")
-import models as models
-sys.path.insert(1, "/depot/cms/users/jprodger/PUPPI/utils/")
+import models
 import utils
 import matplotlib
 from copy import deepcopy
@@ -37,15 +35,17 @@ import mplhep as hep
 
 hep.set_style(hep.style.CMS)
 
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(torch.cuda.is_available())
 testneu = 1
+
 
 def NormaliseDeltaPhi(dphis):
     dphis = np.where(dphis > np.pi, dphis - 2*np.pi, dphis)
     dphis = np.where(dphis < -np.pi, dphis + 2*np.pi, dphis)
     return dphis
-
+    
 
 def NormaliseDeltaRNew(detas, dphis):
     """
@@ -59,13 +59,15 @@ def NormaliseDeltaRNew(detas, dphis):
 def generate_mask(dataset):
     # how many LV and PU to sample
     # dataset = deepcopy(dataset_org)
+    custom_args = Args()
+    
     for graph in dataset:
         LV_index = graph.LV_index
         PU_index = graph.PU_index
         original_feature = graph.x[:, 0:graph.num_feature_actual]
 
-        num_select_LV = 5
-        num_select_PU = 50
+        num_select_LV = custom_args.num_select_LV
+        num_select_PU = custom_args.num_select_PU
 
         if LV_index.shape[0] < num_select_LV or PU_index.shape[0] < num_select_PU:
             num_select_LV = min(LV_index.shape[0], num_select_LV)
@@ -143,15 +145,21 @@ class Args(object):
 
     def __init__(self, model_type='Gated', do_boost=False, extralayers=False):
         self.model_type = model_type
-        self.num_layers = 2
+        self.num_enc_layers = 4
+        self.num_dec_layers = 2
         self.batch_size = 1
-        self.hidden_dim = 20
-        self.dropout = 0
+        self.hidden_dim = 256
+        self.dropout = 0.1
+        self.act_fn = "leakyrelu"
         self.opt = 'adam'
         self.weight_decay = 0
-        self.lr = 0.01
+        self.lr = 0.0001
         self.do_boost = do_boost
         self.extralayers = extralayers
+        self.save_dir = r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\save_dir/"
+        self.num_select_LV = 2
+        self.num_select_PU = 30
+        self.lamb = 0.005
 
 
 class PerformanceMetrics(object):
@@ -166,14 +174,13 @@ class PerformanceMetrics(object):
         dR_diff = 0.
 
 
-def clusterJets(pt, eta, phi, ptcut=200., deltaR=0.8):
+def clusterJets(pt, eta, phi, ptcut=0.5, deltaR=0.8):
     """
     cluster the jets based on the array of pt, eta, phi,
     of all particles (masses are assumed to be zero),
     with pyjet clustering algo
     """
     # cleaning zero pt-ed objects
-    deltaR=0.8
     pt_wptcut = pt[pt > ptcut]
     eta_wptcut = eta[pt > ptcut]
     phi_wptcut = phi[pt > ptcut]
@@ -182,9 +189,9 @@ def clusterJets(pt, eta, phi, ptcut=200., deltaR=0.8):
     event = np.column_stack((pt_wptcut, eta_wptcut, phi_wptcut, mass_wptcut))
     event.dtype = DTYPE_PTEPM
     sequence = cluster(event, R=deltaR, p=-1)
-    #jets = sequence.inclusive_jets(ptmin=1)
+    jets = sequence.inclusive_jets(ptmin=200)
     #charged only
-    jets = sequence.inclusive_jets(ptmin=300)
+    #jets = sequence.inclusive_jets(ptmin=20)
 
     return jets
 
@@ -464,7 +471,11 @@ def postProcessing(data, preds):
             predcopyA[charge_index] = puppi[charge_index]
         
         pt_pred = pt * predcopyA
-        jets_pred = clusterJets(pt_pred,  eta, phi)
+        print("pt")
+        print(pt)
+        print("predcopyA")
+        print(predcopyA)
+        jets_pred = clusterJets(pt_pred, eta, phi)
         njets_pred, pt_jets_pred, eta_jets_pred, phi_jets_pred, mass_jets_pred = ExtractJet(jets_pred)
         performance_jet_pred = compareJets(jets_truth, jets_pred)
 
@@ -473,8 +484,6 @@ def postProcessing(data, preds):
 
         performances_jet_pred.append(performance_jet_pred)
         mets_pred.append(met_pred)
-    
-    
 
     return met_truth,performances_jet_CHS, performances_jet_puppi, met_puppi, performances_jet_puppi_wcut, met_puppi_wcut, performances_jet_pred, mets_pred, neu_pred, neu_puppi, chlv_pred, chpu_pred, chlv_puppi, chpu_puppi, njets_pf, njets_pred, njets_puppi, njets_truth, njets_CHS, pt_jets_pf, pt_jets_pred, pt_jets_puppi, pt_jets_truth, pt_jets_CHS, eta_jets_pf, eta_jets_pred, eta_jets_puppi, eta_jets_truth, eta_jets_CHS, phi_jets_pf, phi_jets_pred, phi_jets_puppi, phi_jets_truth, phi_jets_CHS, mass_jets_pf, mass_jets_pred, mass_jets_puppi, mass_jets_truth, mass_jets_CHS
 
@@ -567,7 +576,6 @@ def test(filelists, models={}):
                     pred = model.forward(data)
                     # print("pred here: ", pred)
                     preds.append(pred)
-
                 met_truth, perfs_jet_CHS, perfs_jet_puppi, met_puppi, perfs_jet_puppi_wcut, met_puppi_wcut, perfs_jet_pred, mets_fromF_pred, neus_pred, neus_puppi, chlvs_pred, chpus_pred, chlvs_puppi, chpus_puppi, Njets_pf, Njets_pred, Njets_puppi, Njets_truth, Njets_CHS, Pt_jets_pf, Pt_jets_pred, Pt_jets_puppi, Pt_jets_truth, Pt_jets_CHS, Eta_jets_pf, Eta_jets_pred, Eta_jets_puppi, Eta_jets_truth, Eta_jets_CHS, Phi_jets_pf, Phi_jets_pred, Phi_jets_puppi, Phi_jets_truth, Phi_jets_CHS, Mass_jets_pf, Mass_jets_pred, Mass_jets_puppi, Mass_jets_truth, Mass_jets_CHS = postProcessing(
                     data, preds)
                 # perfs_jet_puppi, perfs_jet_puppi_wcut, perfs_jet_pred, perfs_jet_pred2, met_truth, met_puppi, met_puppi_wcut, met_pred, met_pred2 = postProcessing(data, preds)
@@ -646,11 +654,12 @@ def test(filelists, models={}):
     return mets_truth, performances_jet_CHS, performances_jet_puppi, mets_puppi, performances_jet_puppi_wcut, mets_puppi_wcut, performances_jet_pred, mets_pred, neu_weight, neu_puppiweight, chlv_weight, chpu_weight, chlv_puppiweight, chpu_puppiweight, njets_pf, njets_pred, njets_puppi, njets_truth, njets_CHS, pt_jets_pf, pt_jets_pred, pt_jets_puppi, pt_jets_truth, pt_jets_CHS, eta_jets_pf, eta_jets_pred, eta_jets_puppi, eta_jets_truth, eta_jets_CHS, phi_jets_pf, phi_jets_pred, phi_jets_puppi, phi_jets_truth, phi_jets_CHS, mass_jets_pf, mass_jets_pred, mass_jets_puppi, mass_jets_truth, mass_jets_CHS
 
 
-def main(modelname, filelists):
-    savefigdir = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/Baseline/"
+def main(modelname, filelists, custom_args):
+    args = custom_args
+    savefigdir = args.save_dir
     # load models
-    args = Args()
-    model_gated_boost = models.GNNStack(9, args.hidden_dim, 1, args)
+    
+    model_gated_boost = models.GNNStack(9, 1, args)
     # model_load.load_state_dict(torch.load('best_valid_model_semi.pt'))
     model_gated_boost.load_state_dict(torch.load(modelname))
 
@@ -683,21 +692,21 @@ def main(modelname, filelists):
     fig = plt.figure(figsize=(10, 8))
     mass_diff = np.array([getattr(perf, "mass_diff")
                          for perf in performances_jet_pred0])
-    print(mass_diff)
+    #print(mass_diff)
     plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='blue', linewidth=linewidth,
-             density=True, label=r'Semi-supervised, $\mu={:10.2f}$, $\sigma={:10.2f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+             density=True, label=r'Semi-supervised, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
     mass_diff = np.array([getattr(perf, "mass_diff")
                          for perf in performances_jet_puppi])
     plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='green', linewidth=linewidth, 
-             density=True, label=r'PUPPI, $\mu={:10.2f}$, $\sigma={:10.2f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+             density=True, label=r'PUPPI, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
     mass_diff = np.array([getattr(perf, "mass_diff")
                          for perf in performances_jet_puppi_wcut])
     plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='red', linewidth=linewidth, 
-             density=True, label=r'PF, $\mu={:10.2f}$, $\sigma={:10.2f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+             density=True, label=r'PF, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
     mass_diff = np.array([getattr(perf, "mass_diff")
                          for perf in performances_jet_CHS])
     plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='orange', linewidth=linewidth, 
-             density=True, label=r'CHS, $\mu={:10.2f}$, $\sigma={:10.2f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+             density=True, label=r'CHS, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
     # plt.xlim(-1.0,1.3)
     plt.xlabel(r"Jet Mass $(m_{reco} - m_{truth})/m_{truth}$")
     plt.ylabel('density')
@@ -830,7 +839,7 @@ def main(modelname, filelists):
     chpu_weight_total = np.array(chpu_weight)
     chlv_puweight_total = np.array(chlv_puppiweight)
     chpu_puweight_total = np.array(chpu_puppiweight)
-    print(chlv_weight_total[:100])
+    #print(chlv_weight_total[:100])
     neutral_weight_total = np.array(neu_weight)
     plt.hist(neutral_weight_total, bins=40, range=(0, 1), histtype='step', color='blue', linewidth=linewidth,
               density=True, label=r'Neutral particle weight')
@@ -891,7 +900,7 @@ def main(modelname, filelists):
                          for perf in performances_jet_pred0])
     mass_truth = np.array([getattr(perf, "mass_truth")
                          for perf in performances_jet_pred0])
-    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,30],[-1,1]], 
+    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,300],[-1,1]], 
               norm=mpl.colors.LogNorm())
     plt.colorbar(a[3])
     plt.title('SSL Jets')
@@ -904,7 +913,7 @@ def main(modelname, filelists):
                          for perf in performances_jet_puppi])
     mass_truth = np.array([getattr(perf, "mass_truth")
                          for perf in performances_jet_puppi])
-    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,30],[-1,1]], 
+    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,300],[-1,1]], 
               norm=mpl.colors.LogNorm())
     plt.colorbar(a[3])
     plt.title('PUPPI Jets')
@@ -917,7 +926,7 @@ def main(modelname, filelists):
                          for perf in performances_jet_puppi_wcut])
     mass_truth = np.array([getattr(perf, "mass_truth")
                          for perf in performances_jet_puppi_wcut])
-    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,30],[-1,1]], 
+    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,300],[-1,1]], 
               norm=mpl.colors.LogNorm())
     plt.colorbar(a[3])
     plt.title('PF Jets')
@@ -930,7 +939,7 @@ def main(modelname, filelists):
                          for perf in performances_jet_CHS])
     mass_truth = np.array([getattr(perf, "mass_truth")
                          for perf in performances_jet_CHS])
-    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,30],[-1,1]], 
+    a = plt.hist2d(mass_truth,mass_diff, bins=20, range=[[0,300],[-1,1]], 
               norm=mpl.colors.LogNorm())
     plt.colorbar(a[3])
     plt.title('CHS Jets')
@@ -994,9 +1003,12 @@ def main(modelname, filelists):
 
 
 if __name__ == '__main__':
-    modelname = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt5/Baseline/best_valid_model_nPU11_deeper.pt"
-    filelists = ["/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset1_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset2_graph_puppi_4000",
-    "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset3_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset4_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset5_graph_puppi_4000",
-    "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset6_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset7_graph_puppi_4000", "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset8_graph_puppi_4000",
-    "/depot/cms/users/jprodger/PUPPI/WnewjetsdR0.4/dataset9_graph_puppi_4000"]
-    main(modelname, filelists)
+    modelname = r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\save_dir\best_valid_model.pt'
+    filelists = [
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_test_300',
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset2_graph_puppi_test_300',
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset3_graph_puppi_test_300',
+        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset4_graph_puppi_test_300'
+    ]
+    custom_args = Args()
+    main(modelname, filelists, custom_args)

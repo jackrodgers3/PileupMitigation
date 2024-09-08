@@ -13,9 +13,9 @@ import torch
 import torch.nn as nn
 from torch_geometric.data import DataLoader
 import models
-import utils2 as utils
-import test_physics_metrics2 as phym
-from test_physics_metrics2 import Args
+import utils
+import test_physics_metrics as phym
+from test_physics_metrics import Args
 import matplotlib
 from copy import deepcopy
 import os
@@ -33,7 +33,6 @@ print(torch.cuda.is_available())
 
 def arg_parse():
     parser = argparse.ArgumentParser(description='GNN arguments.')
-    utils.parse_optimizer(parser)
 
     parser.add_argument('--model_type', type=str,
                         help='Type of GNN model.')
@@ -57,6 +56,8 @@ def arg_parse():
                         help='path for training graphs')
     parser.add_argument('--validation_path', type=str,
                         help='path for validation graphs')
+    parser.add_argument('--testing_path', type=str,
+                        help='path for testing graphs')
     parser.add_argument('--save_dir', type=str,
                         help='directory to save trained model and plots')
     parser.add_argument('--jet_type', type=str,
@@ -67,25 +68,29 @@ def arg_parse():
                         help='number of PU particles')
     parser.add_argument('--act_fn', type=str,
                         help='activation function')
+    parser.add_argument('--n_epochs', type=int,
+                        help='number of epochs to train')
 
     parser.set_defaults(model_type='Gated',
-                        num_enc_layers=4,
+                        num_enc_layers=2,
                         num_dec_layers=2,
                         batch_size=1,
-                        hidden_dim=256,
+                        hidden_dim=64,
                         dropout=0.1,
                         opt='adam',
                         weight_decay=0,
                         lr=0.0001,
                         pulevel=80,
                         lamb=0.005,
-                        training_path=r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_1400",
-                        validation_path=r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_val_300",
-                        save_dir=r"C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\save_dir/",
+                        training_path=r"D:\Data\Research\PUPPI\W_processed\dataset1_graph_puppi_140_disc",
+                        validation_path=r"D:\Data\Research\PUPPI\W_processed\dataset1_graph_puppi_val_30_disc",
+                        testing_path = r"D:\Data\Research\PUPPI\W_processed\dataset1_graph_puppi_test_30_disc",
+                        save_dir=r"C:\Users\jackm\PycharmProjects\PileupMitigation\TwoStep_Final\output/",
                         jet_type="W",
                         num_select_LV=2,
                         num_select_PU=30,
-                        act_fn='leakyrelu'
+                        act_fn='leakyrelu',
+                        n_epochs = 2
                         )
 
     return parser.parse_args()
@@ -96,52 +101,38 @@ def get_lr(optimizer):
         return param_group['lr']
 
 
-def train(dataset, dataset_validation, args):
+def train_disc(dataset, dataset_validation, dataset_test, args):
     directory = args.save_dir
 
     path = directory
     isdir = os.path.isdir(path)
 
+
     if isdir == False:
         os.mkdir(path)
-    os.mkdir(path + 'prob_plots')
+    if os.path.isdir(path + 'prob_plots'):
+        os.rmdir(path + 'prob_plots')
+        os.mkdir(path + 'prob_plots')
+    else:
+        os.mkdir(path + 'prob_plots')
 
     start = timer()
-
-    wandb.init(
-        project = "GP_MODEL_TWEAKING",
-        notes = "encoder leakyrelu"
-    )
-
-    wandb.config = {
-        "model_type": args.model_type,
-        "num_enc_layers": args.num_enc_layers,
-        "num_dec_layers": args.num_dec_layers,
-        "batch_size": args.batch_size,
-        "hidden_dim": args.hidden_dim,
-        "dropout": args.dropout,
-        "weight_decay": args.weight_decay,
-        "lr": args.lr,
-        "lamb": args.lamb,
-        "jet_type": args.jet_type,
-        "num_select_LV": args.num_select_LV,
-        "num_select_PU": args.num_select_PU,
-        "act_fn": args.act_fn
-    }
 
     rotate_mask = 9
 
     generate_mask(dataset, rotate_mask, args.num_select_LV, args.num_select_PU)
     generate_mask(dataset_validation, 1, args.num_select_LV, args.num_select_PU)
+    generate_mask(dataset_test, 1, args.num_select_LV, args.num_select_PU)
 
     training_loader = DataLoader(dataset, batch_size=args.batch_size)
     validation_loader = DataLoader(dataset_validation, batch_size=args.batch_size)
+    test_dataloader = DataLoader(dataset_test, batch_size=args.batch_size)
 
     model = models.GNNStack(
         dataset[0].num_feature_actual, 1, args)
 
     model = model.to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(opt, 30, gamma=0.99)
 
     # train
@@ -175,44 +166,19 @@ def train(dataset, dataset_validation, args):
     train_fig_names = []
     valid_fig_names = []
 
-    train_graph_SSLMassdiffMu = []
-    train_graph_PUPPIMassdiffMu = []
-    train_graph_SSLMassSigma = []
-    train_graph_PUPPIMassSigma = []
-    train_graph_SSLPtdiffMu = []
-    train_graph_SSLPtSigma = []
-    train_graph_PUPPIPtdiffMu = []
-    train_graph_PUPPIPtSigma = []
-
-    valid_graph_SSLMassdiffMu = []
-    valid_graph_PUPPIMassdiffMu = []
-    valid_graph_SSLMassSigma = []
-    valid_graph_PUPPIMassSigma = []
-    valid_graph_SSLPtdiffMu = []
-    valid_graph_SSLPtSigma = []
-    valid_graph_PUPPIPtdiffMu = []
-    valid_graph_PUPPIPtSigma = []
-
     count_event = 0
-    best_validation_metric = 1000.0
-    converge = False
-    converge_num_event = 0
-    last_steady_event = 0
-    lowest_valid_loss = 1000.0
+    best_valid_loss = float("inf")
 
-    while converge == False:
+    for epoch in range(args.n_epochs):
         model.train()
         train_mask_all = None
-
-        t = tqdm(total=len(training_loader), colour='green',
-                 bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-        loss_avg = utils.RunningAverage()
-        for batch in training_loader:
+        for batch_id, batch in tqdm(enumerate(training_loader)):
             count_event += 1
             epochs_train.append(count_event)
             cur_loss = 0.
             feature_with_mask = batch.x
             for iter in range(rotate_mask):
+                opt.zero_grad()
                 num_feature = batch.num_feature_actual[0].item()
                 # print("num_feature ", num_feature)
                 batch.x = torch.cat((feature_with_mask[:, 0:num_feature],
@@ -246,7 +212,7 @@ def train(dataset, dataset_validation, args):
                 # print("label: ", label)
                 loss = model.loss(pred, label, d_da, label_da)
                 cur_loss += loss.item()
-                opt.zero_grad()
+
                 loss.backward()
                 opt.step()
             scheduler.step()
@@ -255,198 +221,74 @@ def train(dataset, dataset_validation, args):
                 print("cur_loss ", cur_loss)
                 print("label: ", label)
                 print("pred: ", pred)
-            cur_loss = cur_loss / rotate_mask
-            wandb.log({"cur_loss": cur_loss})
+            cur_loss /= rotate_mask
             loss_graph.append(cur_loss)
-            # print("cur_loss ", cur_loss)
-            loss_avg.update(cur_loss)
-            # print("loss_avg ", loss_avg())
-            t.set_postfix(loss='{:05.3f}'.format(loss_avg()))
-            t.update()
 
-            if count_event % 1300 == 0:
+        # validation
+        modelcolls = OrderedDict()
+        modelcolls['gated_boost'] = model
+        training_loss, training_loss_hybrid, train_acc, train_auc, train_auc_hybrid, \
+            train_puppi_acc, train_puppi_auc, \
+            train_acc_neu, train_auc_neu, train_auc_neu_hybrid, \
+            train_puppi_acc_neu, train_puppi_auc_neu, train_fig_name = test_disc(
+            training_loader, model, 0, count_event, args)
 
-                modelcolls = OrderedDict()
-                modelcolls['gated_boost'] = model
-                training_loss, training_loss_hybrid, train_acc, train_auc, train_auc_hybrid, \
-                    train_puppi_acc, train_puppi_auc, \
-                    train_acc_neu, train_auc_neu, train_auc_neu_hybrid, \
-                    train_puppi_acc_neu, train_puppi_auc_neu, train_fig_name, train_SSLMassdiffMu, \
-                    train_SSLMassSigma, train_PUPPIMassdiffMu, train_PUPPIMassSigma, train_SSLPtdiffMu, train_SSLPtSigma, \
-                    train_PUPPIPtdiffMu, train_PUPPIPtSigma = test(
-                    training_loader, model, 0, count_event, args, modelcolls, args.training_path)
+        valid_loss, valid_loss_hybrid, valid_acc, valid_auc, valid_auc_hybrid, \
+            valid_puppi_acc, valid_puppi_auc, \
+            valid_acc_neu, valid_auc_neu, valid_auc_neu_hybrid, \
+            valid_puppi_acc_neu, valid_puppi_auc_neu, valid_fig_name = test_disc(
+            validation_loader, model, 1, count_event, args)
 
-                valid_loss, valid_loss_hybrid, valid_acc, valid_auc, valid_auc_hybrid, \
-                    valid_puppi_acc, valid_puppi_auc, \
-                    valid_acc_neu, valid_auc_neu, valid_auc_neu_hybrid, \
-                    valid_puppi_acc_neu, valid_puppi_auc_neu, valid_fig_name, valid_SSLMassdiffMu, \
-                    valid_SSLMassSigma, valid_PUPPIMassdiffMu, valid_PUPPIMassSigma, valid_SSLPtdiffMu, valid_SSLPtSigma, \
-                    valid_PUPPIPtdiffMu, valid_PUPPIPtSigma = test(
-                    validation_loader, model, 1, count_event, args, modelcolls, args.validation_path)
+        epochs_valid.append(count_event)
+        loss_graph_valid.append(valid_loss)
+        loss_graph_train.append(training_loss)
+        loss_graph_train_hybrid.append(training_loss_hybrid)
+        auc_graph_train_puppi.append(train_puppi_auc)
+        auc_graph_valid_puppi.append(valid_puppi_auc)
+        auc_graph_train.append(train_auc)
+        auc_graph_train_hybrid.append(train_auc_hybrid)
+        auc_graph_valid.append(valid_auc)
+        auc_graph_neu_train.append(train_auc_neu)
+        auc_graph_neu_train_hybrid.append(train_auc_neu_hybrid)
+        auc_graph_neu_valid.append(valid_auc_neu)
+        auc_graph_train_puppi_neu.append(train_puppi_auc_neu)
+        auc_graph_valid_puppi_neu.append(valid_puppi_auc_neu)
+        train_accuracy.append(train_acc.item())
+        valid_accuracy.append(valid_acc.item())
+        train_accuracy_neu.append(train_acc_neu.item())
+        valid_accuracy_neu.append(valid_acc_neu.item())
+        train_accuracy_puppi.append(train_puppi_acc.item())
+        valid_accuracy_puppi.append(valid_puppi_acc.item())
+        train_accuracy_puppi_neu.append(train_puppi_acc_neu.item())
+        valid_accuracy_puppi_neu.append(valid_puppi_acc_neu.item())
+        train_fig_names.append(train_fig_name)
+        valid_fig_names.append(valid_fig_name)
 
-                epochs_valid.append(count_event)
-                loss_graph_valid.append(valid_loss)
-                loss_graph_train.append(training_loss)
-                loss_graph_train_hybrid.append(training_loss_hybrid)
-                auc_graph_train_puppi.append(train_puppi_auc)
-                auc_graph_valid_puppi.append(valid_puppi_auc)
-                auc_graph_train.append(train_auc)
-                auc_graph_train_hybrid.append(train_auc_hybrid)
-                auc_graph_valid.append(valid_auc)
-                auc_graph_neu_train.append(train_auc_neu)
-                auc_graph_neu_train_hybrid.append(train_auc_neu_hybrid)
-                auc_graph_neu_valid.append(valid_auc_neu)
-                auc_graph_train_puppi_neu.append(train_puppi_auc_neu)
-                auc_graph_valid_puppi_neu.append(valid_puppi_auc_neu)
-                train_accuracy.append(train_acc.item())
-                valid_accuracy.append(valid_acc.item())
-                train_accuracy_neu.append(train_acc_neu.item())
-                valid_accuracy_neu.append(valid_acc_neu.item())
-                train_accuracy_puppi.append(train_puppi_acc.item())
-                valid_accuracy_puppi.append(valid_puppi_acc.item())
-                train_accuracy_puppi_neu.append(train_puppi_acc_neu.item())
-                valid_accuracy_puppi_neu.append(valid_puppi_acc_neu.item())
-                train_fig_names.append(train_fig_name)
-                valid_fig_names.append(valid_fig_name)
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            print("model is saved in " + path + "/best_valid_model.pt")
+            print(f"New validation loss: {best_valid_loss:.4f}")
+            torch.save(model.state_dict(), path +
+                       "/best_valid_model.pt")
 
-                train_graph_SSLMassdiffMu.append(train_SSLMassdiffMu)
-                train_graph_PUPPIMassdiffMu.append(train_PUPPIMassdiffMu)
-                train_graph_SSLMassSigma.append(train_SSLMassSigma)
-                train_graph_PUPPIMassSigma.append(train_PUPPIMassSigma)
-                train_graph_SSLPtdiffMu.append(train_SSLPtdiffMu)
-                train_graph_SSLPtSigma.append(train_SSLPtSigma)
-                train_graph_PUPPIPtdiffMu.append(train_PUPPIPtdiffMu)
-                train_graph_PUPPIPtSigma.append(train_PUPPIPtSigma)
+    # test
+    best_model = models.GNNStack(
+        dataset[0].num_feature_actual, 1, args)
+    best_model = best_model.to(device)
+    best_model.load_state_dict(torch.load(path + "/best_valid_model.pt"))
+    test_loss, test_loss_hybrid, test_acc, test_auc, test_auc_hybrid, \
+        test_puppi_acc, test_puppi_auc, \
+        test_acc_neu, test_auc_neu, test_auc_neu_hybrid, \
+        test_puppi_acc_neu, test_puppi_auc_neu, test_fig_name = test_disc(
+        test_dataloader, best_model, 2, count_event, args)
 
-                valid_graph_SSLMassdiffMu.append(valid_SSLMassdiffMu)
-                wandb.log({"SSL_mu_valid": valid_SSLMassdiffMu})
-                valid_graph_PUPPIMassdiffMu.append(valid_PUPPIMassdiffMu)
-                wandb.log({"PUPPI_mu_valid": valid_PUPPIMassdiffMu})
-                valid_graph_SSLMassSigma.append(valid_SSLMassSigma)
-                wandb.log({"SSL_sigma_valid": valid_SSLMassSigma})
-                valid_graph_PUPPIMassSigma.append(valid_PUPPIMassSigma)
-                wandb.log({"PUPPI_sigma_valid": valid_PUPPIMassSigma})
-                valid_graph_SSLPtdiffMu.append(valid_SSLPtdiffMu)
-                valid_graph_SSLPtSigma.append(valid_SSLPtSigma)
-                valid_graph_PUPPIPtdiffMu.append(valid_PUPPIPtdiffMu)
-                valid_graph_PUPPIPtSigma.append(valid_PUPPIPtSigma)
-
-                validation_metric = valid_SSLMassSigma / (1.0 - abs(valid_SSLMassdiffMu))
-                wandb.log({"validation_metric": validation_metric})
-
-                if validation_metric < best_validation_metric:
-                    best_validation_metric = validation_metric
-                    print("model is saved in " + path + "/best_valid_model.pt")
-                    print(f"New validation metric: {best_validation_metric:.4f}")
-                    torch.save(model.state_dict(), path +
-                               "/best_valid_model.pt")
-                wandb.log({"best_validation_metric": best_validation_metric})
-
-                if validation_metric >= best_validation_metric:
-                    print(
-                        "valid metric increase at event " + str(count_event) + " with validation metric " + str(
-                            validation_metric))
-                    if last_steady_event == count_event - 1300:
-                        converge_num_event += 1
-                        if converge_num_event > 30:
-                            converge = True
-                            break
-                        else:
-                            last_steady_event = count_event
-                    else:
-                        converge_num_event = 1
-                        last_steady_event = count_event
-                    # print("converge num event " + str(converge_num_event))
-                else:
-                    print("lowest valid metric " + str(validation_metric))
-                    best_validation_metric = validation_metric
-
-                if valid_loss < lowest_valid_loss:
-                    lowest_valid_loss = valid_loss
-
-                if count_event == 1300:
-                    converge = True
-                    break
-
-        t.close()
 
     end = timer()
     training_time = end - start
     print("training time " + str(training_time))
 
-    utils.plot_training(epochs_train, epochs_valid, loss_graph_train,
-                        loss_graph, auc_graph_train, train_accuracy_neu, auc_graph_train_puppi,
-                        train_accuracy_puppi_neu,
-                        loss_graph_valid, auc_graph_valid, valid_accuracy_neu, auc_graph_valid_puppi,
-                        valid_accuracy_puppi_neu,
-                        auc_graph_neu_train, auc_graph_train_puppi_neu,
-                        auc_graph_neu_valid, auc_graph_valid_puppi_neu, dir_name=args.save_dir)
-    plt.figure()
-    plt.plot(epochs_valid, train_graph_SSLMassdiffMu, label='Semi-supervised_train_JetMass, $\mu$', linestyle='solid',
-             linewidth=1, color='g')
-    plt.plot(epochs_valid, valid_graph_SSLMassdiffMu, label='Semi-supervised_valid_JetMass, $\mu$', linestyle='solid',
-             linewidth=1, color='b')
-    plt.plot(epochs_valid, train_graph_PUPPIMassdiffMu, label='PUPPI_train_JetMass, $\mu$', linestyle='solid',
-             linewidth=1, color='r')
-    # plt.plot(epochs_valid, valid_graph_PUPPIMassdiffMu, label = 'PUPPI_valid_JetMass, $\mu$', linestyle = 'solid', linewidth = 1, color = 'o')
-    plt.xlabel('Epochs')
-    plt.ylabel('mean diff')
-    plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_mass_diff_mean.pdf")
-    plt.close()
 
-    plt.figure()
-    plt.plot(epochs_valid, train_graph_SSLPtdiffMu, label='Semi-supervised_train_JetPt, $\mu$', linestyle='solid',
-             linewidth=1, color='g')
-    plt.plot(epochs_valid, valid_graph_SSLPtdiffMu, label='Semi-supervised_valid_JetPt, $\mu$', linestyle='solid',
-             linewidth=1, color='b')
-    plt.plot(epochs_valid, train_graph_PUPPIPtdiffMu, label='PUPPI_train_JetPt, $\mu$', linestyle='solid', linewidth=1,
-             color='r')
-    # plt.plot(epochs_valid, valid_graph_PUPPIPtdiffMu, label = 'PUPPI_valid_JetPt, $\mu$', linestyle = 'solid', linewidth = 1, color = 'o')
-    plt.xlabel('Epochs')
-    plt.ylabel('mean diff')
-    plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_pt_diff_mean.pdf")
-    plt.close()
-
-    plt.figure()
-    plt.plot(epochs_valid, train_graph_SSLMassSigma, label='Semi-supervised_train_JetMass, $\sigma$', linestyle='solid',
-             linewidth=1, color='g')
-    plt.plot(epochs_valid, valid_graph_SSLMassSigma, label='Semi-supervised_valid_JetMass, $\sigma$', linestyle='solid',
-             linewidth=1, color='b')
-    plt.plot(epochs_valid, train_graph_PUPPIMassSigma, label='PUPPI_train_JetMass, $\sigma$', linestyle='solid',
-             linewidth=1, color='r')
-    # plt.plot(epochs_valid, valid_graph_PUPPIMassSigma, label = 'PUPPI_valid_JetMass, $\sigma$', linestyle = 'solid', linewidth = 1, color = 'o')
-    plt.xlabel('Epochs')
-    plt.ylabel('sigma diff')
-    plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_mass_diff_sigma.pdf")
-    plt.close()
-
-    plt.figure()
-    plt.plot(epochs_valid, train_graph_SSLPtSigma, label='Semi-supervised_train_JetPt, $\sigma$', linestyle='solid',
-             linewidth=1, color='g')
-    plt.plot(epochs_valid, valid_graph_SSLPtSigma, label='Semi-supervised_valid_JetPt, $\sigma$', linestyle='solid',
-             linewidth=1, color='b')
-    plt.plot(epochs_valid, train_graph_PUPPIPtSigma, label='PUPPI_train_JetPt, $\sigma$', linestyle='solid',
-             linewidth=1, color='r')
-    # plt.plot(epochs_valid, valid_graph_PUPPIPtSigma, label = 'PUPPI_valid_JetPt, $\sigma$', linestyle = 'solid', linewidth = 1, color = 'o')
-    plt.xlabel('Epochs')
-    plt.ylabel('sigma diff')
-    plt.legend(loc=4)
-    plt.savefig(args.save_dir + "/Jet_pt_diff_sigma.pdf")
-    plt.close()
-
-    # utils.plot_training(epochs_train, epochs_valid, loss_graph_train,
-    #                   loss_graph, auc_graph_train, train_accuracy_neu,
-    #                   loss_graph_valid, auc_graph_valid, valid_accuracy_neu,
-    #                   auc_graph_neu_train,
-    #                   auc_graph_neu_valid, dir_name = args.save_dir
-    #                   )
-    wandb.finish()
-
-
-def test(loader, model, indicator, epoch, args, modelcolls, pathname):
+def test_disc(loader, model, indicator, epoch, args):
     if indicator == 0:
         postfix = 'Train'
     elif indicator == 1:
@@ -574,6 +416,41 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
                                                   'LV Chg', 'PU Chg', 'LV Neu', 'PU Neu'],
                                               postfix=postfix + "_puppi", label='PUPPI Weight',
                                               dir_name=args.save_dir + 'prob_plots/')
+    return total_loss, total_loss_hybrid, acc_chg, auc_chg, auc_chg_hybrid, acc_chg_puppi, auc_chg_puppi, \
+        acc_neu, auc_neu, auc_neu_hybrid, acc_neu_puppi, auc_neu_puppi, fig_name_prediction
+
+
+def test_reco(loader, model, indicator, epoch, args, modelcolls, pathname):
+    if indicator == 0:
+        postfix = 'Train'
+    elif indicator == 1:
+        postfix = 'Validation'
+    else:
+        postfix = 'Test'
+
+    model.eval()
+
+    total_loss = 0.0
+    count = 0
+    for data in loader:
+        count += 1
+        if count == epoch and indicator == 0:
+            break
+        with torch.no_grad():
+            x = data.x.to(device)
+            pred = model.forward(x)
+            label = data.y
+
+            lossMSE = nn.MSELoss()
+            epsi = 1e-10
+            total_loss += lossMSE(pred, label).item() * data.num_graphs
+            # total_loss += model.loss(pred, label).item() * data.num_graphs
+            # total_loss_hybrid += model.loss(pred_hybrid,label).item() * data.num_graphs
+
+    if indicator == 0:
+        total_loss /= min(epoch, len(loader.dataset))
+    else:
+        total_loss /= len(loader.dataset)
 
     filelists = []
     filelists.append(pathname)
@@ -670,6 +547,217 @@ def test(loader, model, indicator, epoch, args, modelcolls, pathname):
     return total_loss, total_loss_hybrid, acc_chg, auc_chg, auc_chg_hybrid, acc_chg_puppi, auc_chg_puppi, \
         acc_neu, auc_neu, auc_neu_hybrid, acc_neu_puppi, auc_neu_puppi, fig_name_prediction, SSLMassdiffMu, \
         SSLMassSigma, PUPPIMassdiffMu, PUPPIMassSigma, SSLPtdiffMu, SSLPtSigma, PUPPIPtdiffMu, PUPPIPtSigma
+
+
+def train_reco(dataset, dataset_validation, dataset_test, args):
+    directory = args.save_dir
+
+    path = directory
+    isdir = os.path.isdir(path)
+
+    start = timer()
+
+    rotate_mask = 9
+
+    # generate_mask(dataset, rotate_mask, args.num_select_LV, args.num_select_PU)
+    # generate_mask(dataset_validation, 1, args.num_select_LV, args.num_select_PU)
+
+    training_loader = DataLoader(dataset, batch_size=args.batch_size)
+    validation_loader = DataLoader(dataset_validation, batch_size=args.batch_size)
+
+    model = models.GNNStack(
+        dataset[0].num_features, 1, args, disc=False)
+
+    model = model.to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, 30, gamma=0.99)
+
+    # train
+    #
+    # todo: this bunch of lists can be replaced with a small class or so
+    #
+    epochs_train = []
+    epochs_valid = []
+    loss_graph = []
+    loss_graph_train = []
+    loss_graph_train_hybrid = []
+    loss_graph_valid = []
+    train_fig_names = []
+    valid_fig_names = []
+
+    train_graph_SSLMassdiffMu = []
+    train_graph_PUPPIMassdiffMu = []
+    train_graph_SSLMassSigma = []
+    train_graph_PUPPIMassSigma = []
+    train_graph_SSLPtdiffMu = []
+    train_graph_SSLPtSigma = []
+    train_graph_PUPPIPtdiffMu = []
+    train_graph_PUPPIPtSigma = []
+
+    valid_graph_SSLMassdiffMu = []
+    valid_graph_PUPPIMassdiffMu = []
+    valid_graph_SSLMassSigma = []
+    valid_graph_PUPPIMassSigma = []
+    valid_graph_SSLPtdiffMu = []
+    valid_graph_SSLPtSigma = []
+    valid_graph_PUPPIPtdiffMu = []
+    valid_graph_PUPPIPtSigma = []
+
+    count_event = 0
+    best_valid_loss = float("inf")
+
+    for epoch in range(args.n_epochs):
+        model.train()
+        for batch_id, batch in tqdm(enumerate(training_loader)):
+            count_event += 1
+            epochs_train.append(count_event)
+            cur_loss = 0.
+            batch = batch.to(device)
+
+            pred = model.forward(batch)
+
+            label = batch.y
+
+            loss = model.loss_reco(pred, label)
+            cur_loss += loss.item()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            scheduler.step()
+
+            if math.isnan(cur_loss):
+                print("cur_loss ", cur_loss)
+                print("label: ", label)
+                print("pred: ", pred)
+            cur_loss = cur_loss / rotate_mask
+            wandb.log({"cur_loss": cur_loss})
+            loss_graph.append(cur_loss)
+
+        # validation
+        modelcolls = OrderedDict()
+        modelcolls['gated_boost'] = model
+        training_loss, training_loss_hybrid, train_acc, train_auc, train_auc_hybrid, \
+            train_puppi_acc, train_puppi_auc, \
+            train_acc_neu, train_auc_neu, train_auc_neu_hybrid, \
+            train_puppi_acc_neu, train_puppi_auc_neu, train_fig_name, train_SSLMassdiffMu, \
+            train_SSLMassSigma, train_PUPPIMassdiffMu, train_PUPPIMassSigma, train_SSLPtdiffMu, train_SSLPtSigma, \
+            train_PUPPIPtdiffMu, train_PUPPIPtSigma = test_reco(
+            training_loader, model, 0, count_event, args, modelcolls, args.training_path)
+
+        valid_loss, valid_loss_hybrid, valid_acc, valid_auc, valid_auc_hybrid, \
+            valid_puppi_acc, valid_puppi_auc, \
+            valid_acc_neu, valid_auc_neu, valid_auc_neu_hybrid, \
+            valid_puppi_acc_neu, valid_puppi_auc_neu, valid_fig_name, valid_SSLMassdiffMu, \
+            valid_SSLMassSigma, valid_PUPPIMassdiffMu, valid_PUPPIMassSigma, valid_SSLPtdiffMu, valid_SSLPtSigma, \
+            valid_PUPPIPtdiffMu, valid_PUPPIPtSigma = test_reco(
+            validation_loader, model, 1, count_event, args, modelcolls, args.validation_path)
+
+        epochs_valid.append(count_event)
+        loss_graph_valid.append(valid_loss)
+        loss_graph_train.append(training_loss)
+        loss_graph_train_hybrid.append(training_loss_hybrid)
+        train_fig_names.append(train_fig_name)
+        valid_fig_names.append(valid_fig_name)
+
+        train_graph_SSLMassdiffMu.append(train_SSLMassdiffMu)
+        train_graph_PUPPIMassdiffMu.append(train_PUPPIMassdiffMu)
+        train_graph_SSLMassSigma.append(train_SSLMassSigma)
+        train_graph_PUPPIMassSigma.append(train_PUPPIMassSigma)
+        train_graph_SSLPtdiffMu.append(train_SSLPtdiffMu)
+        train_graph_SSLPtSigma.append(train_SSLPtSigma)
+        train_graph_PUPPIPtdiffMu.append(train_PUPPIPtdiffMu)
+        train_graph_PUPPIPtSigma.append(train_PUPPIPtSigma)
+
+        valid_graph_SSLMassdiffMu.append(valid_SSLMassdiffMu)
+        valid_graph_PUPPIMassdiffMu.append(valid_PUPPIMassdiffMu)
+        valid_graph_SSLMassSigma.append(valid_SSLMassSigma)
+        valid_graph_PUPPIMassSigma.append(valid_PUPPIMassSigma)
+        valid_graph_SSLPtdiffMu.append(valid_SSLPtdiffMu)
+        valid_graph_SSLPtSigma.append(valid_SSLPtSigma)
+        valid_graph_PUPPIPtdiffMu.append(valid_PUPPIPtdiffMu)
+        valid_graph_PUPPIPtSigma.append(valid_PUPPIPtSigma)
+
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            print("model is saved in " + path + "/best_valid_model.pt")
+            print(f"New validation loss: {best_valid_loss:.4f}")
+            torch.save(model.state_dict(), path +
+                       "/best_valid_model.pt")
+
+    end = timer()
+    training_time = end - start
+    print("training time " + str(training_time))
+
+    utils.plot_training(epochs_train, epochs_valid, loss_graph_train,
+                        loss_graph, auc_graph_train, train_accuracy_neu, auc_graph_train_puppi,
+                        train_accuracy_puppi_neu,
+                        loss_graph_valid, auc_graph_valid, valid_accuracy_neu, auc_graph_valid_puppi,
+                        valid_accuracy_puppi_neu,
+                        auc_graph_neu_train, auc_graph_train_puppi_neu,
+                        auc_graph_neu_valid, auc_graph_valid_puppi_neu, dir_name=args.save_dir)
+    plt.figure()
+    plt.plot(epochs_valid, train_graph_SSLMassdiffMu, label='Semi-supervised_train_JetMass, $\mu$', linestyle='solid',
+             linewidth=1, color='g')
+    plt.plot(epochs_valid, valid_graph_SSLMassdiffMu, label='Semi-supervised_valid_JetMass, $\mu$', linestyle='solid',
+             linewidth=1, color='b')
+    plt.plot(epochs_valid, train_graph_PUPPIMassdiffMu, label='PUPPI_train_JetMass, $\mu$', linestyle='solid',
+             linewidth=1, color='r')
+    # plt.plot(epochs_valid, valid_graph_PUPPIMassdiffMu, label = 'PUPPI_valid_JetMass, $\mu$', linestyle = 'solid', linewidth = 1, color = 'o')
+    plt.xlabel('Epochs')
+    plt.ylabel('mean diff')
+    plt.legend(loc=4)
+    plt.savefig(args.save_dir + "/Jet_mass_diff_mean.pdf")
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs_valid, train_graph_SSLPtdiffMu, label='Semi-supervised_train_JetPt, $\mu$', linestyle='solid',
+             linewidth=1, color='g')
+    plt.plot(epochs_valid, valid_graph_SSLPtdiffMu, label='Semi-supervised_valid_JetPt, $\mu$', linestyle='solid',
+             linewidth=1, color='b')
+    plt.plot(epochs_valid, train_graph_PUPPIPtdiffMu, label='PUPPI_train_JetPt, $\mu$', linestyle='solid', linewidth=1,
+             color='r')
+    # plt.plot(epochs_valid, valid_graph_PUPPIPtdiffMu, label = 'PUPPI_valid_JetPt, $\mu$', linestyle = 'solid', linewidth = 1, color = 'o')
+    plt.xlabel('Epochs')
+    plt.ylabel('mean diff')
+    plt.legend(loc=4)
+    plt.savefig(args.save_dir + "/Jet_pt_diff_mean.pdf")
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs_valid, train_graph_SSLMassSigma, label='Semi-supervised_train_JetMass, $\sigma$', linestyle='solid',
+             linewidth=1, color='g')
+    plt.plot(epochs_valid, valid_graph_SSLMassSigma, label='Semi-supervised_valid_JetMass, $\sigma$', linestyle='solid',
+             linewidth=1, color='b')
+    plt.plot(epochs_valid, train_graph_PUPPIMassSigma, label='PUPPI_train_JetMass, $\sigma$', linestyle='solid',
+             linewidth=1, color='r')
+    # plt.plot(epochs_valid, valid_graph_PUPPIMassSigma, label = 'PUPPI_valid_JetMass, $\sigma$', linestyle = 'solid', linewidth = 1, color = 'o')
+    plt.xlabel('Epochs')
+    plt.ylabel('sigma diff')
+    plt.legend(loc=4)
+    plt.savefig(args.save_dir + "/Jet_mass_diff_sigma.pdf")
+    plt.close()
+
+    plt.figure()
+    plt.plot(epochs_valid, train_graph_SSLPtSigma, label='Semi-supervised_train_JetPt, $\sigma$', linestyle='solid',
+             linewidth=1, color='g')
+    plt.plot(epochs_valid, valid_graph_SSLPtSigma, label='Semi-supervised_valid_JetPt, $\sigma$', linestyle='solid',
+             linewidth=1, color='b')
+    plt.plot(epochs_valid, train_graph_PUPPIPtSigma, label='PUPPI_train_JetPt, $\sigma$', linestyle='solid',
+             linewidth=1, color='r')
+    # plt.plot(epochs_valid, valid_graph_PUPPIPtSigma, label = 'PUPPI_valid_JetPt, $\sigma$', linestyle = 'solid', linewidth = 1, color = 'o')
+    plt.xlabel('Epochs')
+    plt.ylabel('sigma diff')
+    plt.legend(loc=4)
+    plt.savefig(args.save_dir + "/Jet_pt_diff_sigma.pdf")
+    plt.close()
+
+    # utils.plot_training(epochs_train, epochs_valid, loss_graph_train,
+    #                   loss_graph, auc_graph_train, train_accuracy_neu,
+    #                   loss_graph_valid, auc_graph_valid, valid_accuracy_neu,
+    #                   auc_graph_neu_train,
+    #                   auc_graph_neu_valid, dir_name = args.save_dir
+    #                   )
+    wandb.finish()
 
 
 def generate_mask(dataset, num_mask, num_select_LV, num_select_PU):
@@ -771,43 +859,30 @@ def generate_neu_mask(dataset, args):
     return dataset
 
 
-def main():
+def main_disc():
     args = arg_parse()
-    print("model type: ", args.model_type)
-
     # load the constructed graphs
     with open(args.training_path, "rb") as fp:
         dataset = pickle.load(fp)
     with open(args.validation_path, "rb") as fp:
         dataset_validation = pickle.load(fp)
-
+    with open(args.testing_path, "rb") as fp:
+        dataset_test = pickle.load(fp)
     generate_neu_mask(dataset, args)
     generate_neu_mask(dataset_validation, args)
-    train(dataset, dataset_validation, args)
+    generate_neu_mask(dataset_test, args)
+    train_disc(dataset, dataset_validation, dataset_test, args)
 
-    custom_arg = Args()
 
-    custom_arg.hidden_dim = args.hidden_dim
-    custom_arg.dropout = args.dropout
-    custom_arg.lr = args.lr
-    custom_arg.num_select_LV = args.num_select_LV
-    custom_arg.num_select_PU = args.num_select_PU
-    custom_arg.num_enc_layers = args.num_enc_layers
-    custom_arg.num_dec_layers = args.num_dec_layers
-    custom_arg.lamb = args.lamb
-    custom_arg.weight_decay = args.weight_decay
-    custom_arg.act_fn = args.act_fn
-    custom_arg.save_dir = args.save_dir
-
-    modelname = args.save_dir + 'best_valid_model.pt'
-    filelists = [
-        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset1_graph_puppi_test_300',
-        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset2_graph_puppi_test_300',
-        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset3_graph_puppi_test_300',
-        r'C:\Users\jackm\PycharmProjects\PileupMitigation\SSL_GNN_REVAMP\test_data\dR0.4\dataset4_graph_puppi_test_300'
-    ]
-    phym.main(modelname=modelname, filelists=filelists, custom_args=custom_arg)
-
+def main_reco():
+    args = arg_parse()
+    with open(args.training_path, "rb") as fp:
+        dataset = pickle.load(fp)
+    with open(args.validation_path, "rb") as fp:
+        dataset_validation = pickle.load(fp)
+    with open(args.testing_path, "rb") as fp:
+        dataset_test = pickle.load(fp)
+    train_reco(dataset, dataset_validation, dataset_test, args)
 
 if __name__ == '__main__':
-    main()
+    main_disc()

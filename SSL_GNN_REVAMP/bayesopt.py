@@ -750,17 +750,28 @@ def generate_mask(dataset, num_mask, num_select_LV, num_select_PU):
 def generate_neu_mask(dataset, args):
     # all neutrals with pt cuts are masked for evaluation
     for graph in dataset:
+        # get number of particles
         nparticles = graph.num_nodes
+        # get number of features
         graph.num_feature_actual = graph.num_features
+        # get neutral particle indices
         Neutral_index = graph.Neutral_index
+        # get features of each neutral particle in neutral index
         Neutral_feature = graph.x[Neutral_index]
+        # exclude neutral indices whose pt is less than ptcut
         Neutral_index = Neutral_index[torch.where(
             Neutral_feature[:, 2] > 0.5)[0]]
+        # get subset of neutral indices of length (nLV + nPU)
         random_mask_index = np.random.choice(Neutral_index, args.num_select_LV + args.num_select_PU, replace = False)
+        # create empty mask
         mask_neu = torch.zeros(nparticles, 1)
+        # create another empty mask
         random_mask_neu = torch.zeros(nparticles, 1)
+        # make first mask all 1s where neutral particles are
         mask_neu[Neutral_index, 0] = 1
+        # make second mask 1s only where a random subset of neutral particles are
         random_mask_neu[random_mask_index, 0] = 1
+        # put them both in graph
         graph.mask_neu = mask_neu
         graph.random_mask_neu = random_mask_neu
 
