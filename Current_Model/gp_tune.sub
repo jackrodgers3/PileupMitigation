@@ -1,0 +1,16 @@
+#!/bin/bash
+# FILENAME: gp_tune.sub
+#SBATCH --job-name gp_tuning
+#SBATCH --output=/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925_focal/gp_tuning.out
+#SBATCH -A cms-f
+#SBATCH --nodes=1 --gpus-per-node=1
+#SBATCH --mem=120000
+#SBATCH --time=96:00:00
+
+/bin/hostname
+
+module load anaconda
+
+source activate /depot/cms/users/jprodger/Condaenvs/env1
+
+python /depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925_focal/bayesopt.py
