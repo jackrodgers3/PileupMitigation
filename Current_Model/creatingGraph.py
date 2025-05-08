@@ -197,27 +197,27 @@ def prepare_dataset(rfilename, num_event, dR, num_start=0):
     return data_list
 
 
-def main(dR = 0.4):
+def main(dR = 0.3):
 
     start = timer()
 
-    iname = r"/depot/cms/private/users/gpaspala/WJetsToQQ_HT-800toInf/output_1.root"
-    save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment11242024/data/"
+    iname = r"/depot/cms/private/users/gpaspala/ZJetsToQQ_HT-800toInf/output_1.root"
+    save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment030225/data/"
 
-    num_events_train = 6000
+    num_events_train = 10000
     oname = save_dir + "dataset_graph_puppi_" + str(num_events_train)
     dataset_train = prepare_dataset(iname, num_events_train, dR)
     # save outputs in pickle format
     with open(oname, "wb") as fp:
         pickle.dump(dataset_train, fp)
 
-    num_events_test = 1800
+    num_events_test = 20000
     oname = save_dir + "dataset_graph_puppi_test_" + str(num_events_test)
     dataset_test = prepare_dataset(iname, num_events_test, dR, num_events_train)
     with open(oname, "wb") as fp:
         pickle.dump(dataset_test, fp)
 
-    num_events_valid = 1800
+    num_events_valid = 5000
     oname = save_dir + "dataset_graph_puppi_val_" + str(num_events_valid)
     dataset_valid = prepare_dataset(
         iname, num_events_valid, dR, num_events_train + num_events_test)

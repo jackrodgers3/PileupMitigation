@@ -25,6 +25,7 @@ import pickle
 import joblib
 from timeit import default_timer as timer
 from tqdm import tqdm
+from scipy.stats import binned_statistic
 
 import matplotlib as mpl
 #import imageio
@@ -175,6 +176,10 @@ class PerformanceMetrics(object):
         pt_diff = 0.
         mass_diff = 0.
         dR_diff = 0.
+        mass_pred = 0.
+        mass_truth = 0.
+        pt_truth = 0.
+        pt_pred = 0.
 
 
 def clusterJets(pt, eta, phi, ptcut=0.5, deltaR=0.8):
@@ -259,9 +264,12 @@ def compareJets(jets_truth, jets_reco, dRcut=0.1):
 
     matched_indices = matchJets(jets_truth, jets_reco, dRcut=dRcut)
     for ijet_truth, ijet_reco in matched_indices:
+        #if 85.0 <= jets_truth[ijet_truth].mass <= 95.0:
         perf = PerformanceMetrics()
         perf.pt_truth = jets_truth[ijet_truth].pt
         perf.mass_truth = jets_truth[ijet_truth].mass
+        perf.mass_pred = jets_reco[ijet_reco].mass
+        perf.pt_pred = jets_reco[ijet_reco].pt
         perf.mass_diff = (
             jets_reco[ijet_reco].mass - jets_truth[ijet_truth].mass)/(jets_truth[ijet_truth].mass+1e-6)
         perf.pt_diff = (
@@ -689,12 +697,291 @@ def main(modelname, filelists, custom_args):
     linewidth = 1.5
     fontsize = 18
 
+    # binned_statistic plots
+    N_BINS = 40
+    filter_mass_top = 120.
+    filter_mass_bottom = 130.
+    
+    mass_truth_SSL = np.array([getattr(perf, "mass_truth")
+                         for perf in performances_jet_pred0 if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    mass_truth_PUPPI = np.array([getattr(perf, "mass_truth")
+                         for perf in performances_jet_puppi if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    mass_truth_PF = np.array([getattr(perf, "mass_truth")
+                         for perf in performances_jet_puppi_wcut if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    mass_truth_CHS = np.array([getattr(perf, "mass_truth")
+                         for perf in performances_jet_CHS if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    
+    mass_rel_diff_SSL = np.array([getattr(perf, "mass_diff")
+                         for perf in performances_jet_pred0 if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    mass_rel_diff_PUPPI = np.array([getattr(perf, "mass_diff")
+                         for perf in performances_jet_puppi if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    mass_rel_diff_PF = np.array([getattr(perf, "mass_diff")
+                         for perf in performances_jet_puppi_wcut if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    mass_rel_diff_CHS = np.array([getattr(perf, "mass_diff")
+                         for perf in performances_jet_CHS if filter_mass_bottom <= getattr(perf, "mass_truth") <= filter_mass_top])
+    
+    # rel mass diff
+    masses_binned = binned_statistic(x=mass_truth_SSL, values=mass_truth_SSL, statistic='mean', bins=N_BINS)
+    ssl_masses_reldiff_means_binned = binned_statistic(x=mass_truth_SSL, values=mass_rel_diff_SSL, statistic='mean',
+                                                       bins=N_BINS)
+    ssl_masses_reldiff_stds_binned = binned_statistic(x=mass_truth_SSL, values=mass_rel_diff_SSL, statistic='std',
+                                                      bins=N_BINS)
+
+    puppi_masses_reldiff_means_binned = binned_statistic(x=mass_truth_PUPPI, values=mass_rel_diff_PUPPI, statistic='mean',
+                                                       bins=N_BINS)
+    puppi_masses_reldiff_stds_binned = binned_statistic(x=mass_truth_PUPPI, values=mass_rel_diff_PUPPI, statistic='std',
+                                                      bins=N_BINS)
+
+    pf_masses_reldiff_means_binned = binned_statistic(x=mass_truth_PF, values=mass_rel_diff_PF, statistic='mean',
+                                                       bins=N_BINS)
+    pf_masses_reldiff_stds_binned = binned_statistic(x=mass_truth_PF, values=mass_rel_diff_PF, statistic='std',
+                                                      bins=N_BINS)
+
+    chs_masses_reldiff_means_binned = binned_statistic(x=mass_truth_CHS, values=mass_rel_diff_CHS, statistic='mean',
+                                                       bins=N_BINS)
+    chs_masses_reldiff_stds_binned = binned_statistic(x=mass_truth_CHS, values=mass_rel_diff_CHS, statistic='std',
+                                                      bins=N_BINS)
+
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(masses_binned.statistic, np.absolute(ssl_masses_reldiff_means_binned.statistic), 'go', label='SSL')
+    plt.plot(masses_binned.statistic, np.absolute(puppi_masses_reldiff_means_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(masses_binned.statistic, np.absolute(pf_masses_reldiff_means_binned.statistic), 'bo', label='PF')
+    plt.plot(masses_binned.statistic, np.absolute(chs_masses_reldiff_means_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean mass vs. mean relative difference in mass')
+    plt.xlabel(r'mean mass [GeV]')
+    plt.ylabel(r'mean of $(m_{reco} - m_{truth})/m_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_mass_rel_diff_comp_log.png')
+    plt.close()
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(masses_binned.statistic, np.absolute(ssl_masses_reldiff_means_binned.statistic), 'go', label='SSL')
+    plt.plot(masses_binned.statistic, np.absolute(puppi_masses_reldiff_means_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(masses_binned.statistic, np.absolute(pf_masses_reldiff_means_binned.statistic), 'bo', label='PF')
+    plt.plot(masses_binned.statistic, np.absolute(chs_masses_reldiff_means_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean mass vs. mean relative difference in mass')
+    plt.xlabel(r'mean mass [GeV]')
+    plt.ylabel(r'mean of $(m_{reco} - m_{truth})/m_{truth}$')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_mass_rel_diff_comp_nolog.png')
+    plt.close()
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(masses_binned.statistic, np.absolute(ssl_masses_reldiff_stds_binned.statistic), 'go', label='SSL')
+    plt.plot(masses_binned.statistic, np.absolute(puppi_masses_reldiff_stds_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(masses_binned.statistic, np.absolute(pf_masses_reldiff_stds_binned.statistic), 'bo', label='PF')
+    plt.plot(masses_binned.statistic, np.absolute(chs_masses_reldiff_stds_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean mass vs. std relative difference in mass')
+    plt.xlabel(r'mean mass [GeV]')
+    plt.ylabel(r'std of $(m_{reco} - m_{truth})/m_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'std_mass_rel_diff_comp_log.png')
+    plt.close()
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(masses_binned.statistic, np.absolute(ssl_masses_reldiff_stds_binned.statistic), 'go', label='SSL')
+    plt.plot(masses_binned.statistic, np.absolute(puppi_masses_reldiff_stds_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(masses_binned.statistic, np.absolute(pf_masses_reldiff_stds_binned.statistic), 'bo', label='PF')
+    plt.plot(masses_binned.statistic, np.absolute(chs_masses_reldiff_stds_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean mass vs. std relative difference in mass')
+    plt.xlabel(r'mean mass [GeV]')
+    plt.ylabel(r'std of $(m_{reco} - m_{truth})/m_{truth}$')
+    plt.legend()
+    plt.savefig(savefigdir + 'std_mass_rel_diff_comp_nolog.png')
+    plt.close()
+    
+    ssldpuppi = [(ssl_masses_reldiff_stds_binned.statistic[i] / puppi_masses_reldiff_stds_binned.statistic[i]) for i in range(N_BINS)]
+    ssldpf = [(ssl_masses_reldiff_stds_binned.statistic[i] / pf_masses_reldiff_stds_binned.statistic[i]) for i in range(N_BINS)]
+    ssldchs = [(ssl_masses_reldiff_stds_binned.statistic[i] / chs_masses_reldiff_stds_binned.statistic[i]) for i in range(N_BINS)]
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(masses_binned.statistic, ssldpuppi, 'ro', label = 'SSL/PUPPI')
+    plt.plot(masses_binned.statistic, ssldpf, 'bo', label = 'SSL/PF')
+    plt.plot(masses_binned.statistic, ssldpf, 'go', label = 'SSL/CHS')
+    plt.axhline(y = 1.0, color = 'b', linestyle = '-')
+    plt.title('rel mass diff std ratio')
+    plt.grid(True)
+    plt.legend()
+    plt.savefig(savefigdir + 'std_rel_mass_ratio.png')
+    plt.close()
+    
+    
+    pt_truth_SSL = np.array([getattr(perf, "pt_truth")
+                         for perf in performances_jet_pred0])
+    pt_truth_PUPPI = np.array([getattr(perf, "pt_truth")
+                         for perf in performances_jet_puppi])
+    pt_truth_PF = np.array([getattr(perf, "pt_truth")
+                         for perf in performances_jet_puppi_wcut])
+    pt_truth_CHS = np.array([getattr(perf, "pt_truth")
+                         for perf in performances_jet_CHS])
+    
+    pt_rel_diff_SSL = np.array([getattr(perf, "pt_diff")
+                         for perf in performances_jet_pred0])
+    pt_rel_diff_PUPPI = np.array([getattr(perf, "pt_diff")
+                         for perf in performances_jet_puppi])
+    pt_rel_diff_PF = np.array([getattr(perf, "pt_diff")
+                         for perf in performances_jet_puppi_wcut])
+    pt_rel_diff_CHS = np.array([getattr(perf, "pt_diff")
+                         for perf in performances_jet_CHS])
+    # rel pt diff
+    pts_binned = binned_statistic(x=pt_truth_SSL, values=pt_truth_SSL, statistic='mean', bins=N_BINS)
+    ssl_pts_reldiff_means_binned = binned_statistic(x=pt_truth_SSL, values=pt_rel_diff_SSL, statistic='mean',
+                                                       bins=N_BINS)
+    ssl_pts_reldiff_stds_binned = binned_statistic(x=pt_truth_SSL, values=pt_rel_diff_SSL, statistic='std',
+                                                      bins=N_BINS)
+
+    puppi_pts_reldiff_means_binned = binned_statistic(x=pt_truth_PUPPI, values=pt_rel_diff_PUPPI, statistic='mean',
+                                                       bins=N_BINS)
+    puppi_pts_reldiff_stds_binned = binned_statistic(x=pt_truth_PUPPI, values=pt_rel_diff_PUPPI, statistic='std',
+                                                      bins=N_BINS)
+
+    pf_pts_reldiff_means_binned = binned_statistic(x=pt_truth_PF, values=pt_rel_diff_PF, statistic='mean',
+                                                       bins=N_BINS)
+    pf_pts_reldiff_stds_binned = binned_statistic(x=pt_truth_PF, values=pt_rel_diff_PF, statistic='std',
+                                                      bins=N_BINS)
+
+    chs_pts_reldiff_means_binned = binned_statistic(x=pt_truth_CHS, values=pt_rel_diff_CHS, statistic='mean',
+                                                       bins=N_BINS)
+    chs_pts_reldiff_stds_binned = binned_statistic(x=pt_truth_CHS, values=pt_rel_diff_CHS, statistic='std',
+                                                      bins=N_BINS)
+
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(pts_binned.statistic, np.absolute(ssl_pts_reldiff_means_binned.statistic), 'go', label='SSL')
+    plt.plot(pts_binned.statistic, np.absolute(puppi_pts_reldiff_means_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(pts_binned.statistic, np.absolute(pf_pts_reldiff_means_binned.statistic), 'bo', label='PF')
+    plt.plot(pts_binned.statistic, np.absolute(chs_pts_reldiff_means_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean pt vs. mean relative difference in pt')
+    plt.xlabel(r'mean pt [GeV]')
+    plt.ylabel(r'mean of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_pt_rel_diff_comp_log.png')
+    plt.close()
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(pts_binned.statistic, np.absolute(ssl_pts_reldiff_means_binned.statistic), 'go', label='SSL')
+    plt.plot(pts_binned.statistic, np.absolute(puppi_pts_reldiff_means_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(pts_binned.statistic, np.absolute(pf_pts_reldiff_means_binned.statistic), 'bo', label='PF')
+    plt.plot(pts_binned.statistic, np.absolute(chs_pts_reldiff_means_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean pt vs. mean relative difference in pt')
+    plt.xlabel(r'mean pt [GeV]')
+    plt.ylabel(r'mean of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_pt_rel_diff_comp_nolog.png')
+    plt.close()
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(pts_binned.statistic, np.absolute(ssl_pts_reldiff_stds_binned.statistic), 'go', label='SSL')
+    plt.plot(pts_binned.statistic, np.absolute(puppi_pts_reldiff_stds_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(pts_binned.statistic, np.absolute(pf_pts_reldiff_stds_binned.statistic), 'bo', label='PF')
+    plt.plot(pts_binned.statistic, np.absolute(chs_pts_reldiff_stds_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean pt vs. std relative difference in pt')
+    plt.xlabel(r'mean pt [GeV]')
+    plt.ylabel(r'std of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'std_pt_rel_diff_comp_log.png')
+    plt.close()
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(pts_binned.statistic, np.absolute(ssl_pts_reldiff_stds_binned.statistic), 'go', label='SSL')
+    plt.plot(pts_binned.statistic, np.absolute(puppi_pts_reldiff_stds_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(pts_binned.statistic, np.absolute(pf_pts_reldiff_stds_binned.statistic), 'bo', label='PF')
+    plt.plot(pts_binned.statistic, np.absolute(chs_pts_reldiff_stds_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean pt vs. std relative difference in pt')
+    plt.xlabel(r'mean pt [GeV]')
+    plt.ylabel(r'std of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.legend()
+    plt.savefig(savefigdir + 'std_pt_rel_diff_comp_nolog.png')
+    plt.close()
+    
+    # combined mass and pt
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(np.absolute(ssl_pts_reldiff_means_binned.statistic), np.absolute(ssl_masses_reldiff_means_binned.statistic), 'go', label='SSL')
+    plt.plot(np.absolute(puppi_pts_reldiff_means_binned.statistic), np.absolute(puppi_masses_reldiff_means_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(np.absolute(pf_pts_reldiff_means_binned.statistic), np.absolute(pf_masses_reldiff_means_binned.statistic), 'bo', label='PF')
+    plt.plot(np.absolute(chs_pts_reldiff_means_binned.statistic), np.absolute(chs_masses_reldiff_means_binned.statistic), 'mo', label='CHS')
+    plt.title('mean relative difference in pT vs. mean relative difference in mass')
+    plt.xlabel(r'mean of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.ylabel(r'mean of $(m_{reco} - m_{truth})/m_{truth}$')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_rel_ptvm.png')
+    plt.close()
+    
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(np.absolute(ssl_pts_reldiff_stds_binned.statistic), np.absolute(ssl_masses_reldiff_stds_binned.statistic), 'go', label='SSL')
+    plt.plot(np.absolute(puppi_pts_reldiff_stds_binned.statistic), np.absolute(puppi_masses_reldiff_stds_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(np.absolute(pf_pts_reldiff_stds_binned.statistic), np.absolute(pf_masses_reldiff_stds_binned.statistic), 'bo', label='PF')
+    plt.plot(np.absolute(chs_pts_reldiff_stds_binned.statistic), np.absolute(chs_masses_reldiff_stds_binned.statistic), 'mo', label='CHS')
+    plt.title('std relative difference in pT vs. std relative difference in mass')
+    plt.xlabel(r'std of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.ylabel(r'std of $(m_{reco} - m_{truth})/m_{truth}$')
+    plt.legend()
+    plt.savefig(savefigdir + 'std_rel_ptvm.png')
+    plt.close()
+
+    # cross terms
+    # std(pt) vs mass, mean(pt) vs mass, std(mass) vs pt, mean(mass) vs pt
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(masses_binned.statistic, np.absolute(ssl_pts_reldiff_means_binned.statistic), 'go', label='SSL')
+    plt.plot(masses_binned.statistic, np.absolute(puppi_pts_reldiff_means_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(masses_binned.statistic, np.absolute(pf_pts_reldiff_means_binned.statistic), 'bo', label='PF')
+    plt.plot(masses_binned.statistic, np.absolute(chs_pts_reldiff_means_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean truth mass vs. mean relative difference in pt')
+    plt.xlabel(r'mean truth mass [GeV]')
+    plt.ylabel(r'mean of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_mass_v_mean_pt.png')
+    plt.close()
+
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(masses_binned.statistic, np.absolute(ssl_pts_reldiff_stds_binned.statistic), 'go', label='SSL')
+    plt.plot(masses_binned.statistic, np.absolute(puppi_pts_reldiff_stds_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(masses_binned.statistic, np.absolute(pf_pts_reldiff_stds_binned.statistic), 'bo', label='PF')
+    plt.plot(masses_binned.statistic, np.absolute(chs_pts_reldiff_stds_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean truth mass vs. std relative difference in pt')
+    plt.xlabel(r'mean truth mass [GeV]')
+    plt.ylabel(r'std of $(pT_{reco} - pT_{truth})/pT_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_mass_v_std_pt.png')
+    plt.close()
+
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(pts_binned.statistic, np.absolute(ssl_masses_reldiff_means_binned.statistic), 'go', label='SSL')
+    plt.plot(pts_binned.statistic, np.absolute(puppi_masses_reldiff_means_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(pts_binned.statistic, np.absolute(pf_masses_reldiff_means_binned.statistic), 'bo', label='PF')
+    plt.plot(pts_binned.statistic, np.absolute(chs_masses_reldiff_means_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean truth pt vs. mean relative difference in mass')
+    plt.xlabel(r'mean truth pt [GeV]')
+    plt.ylabel(r'mean of $(mass_{reco} - mass_{truth})/mass_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_pt_v_mean_mass.png')
+    plt.close()
+
+    fig = plt.figure(figsize=(10, 8))
+    plt.plot(pts_binned.statistic, np.absolute(ssl_masses_reldiff_stds_binned.statistic), 'go', label='SSL')
+    plt.plot(pts_binned.statistic, np.absolute(puppi_masses_reldiff_stds_binned.statistic), 'ro', label='PUPPI')
+    plt.plot(pts_binned.statistic, np.absolute(pf_masses_reldiff_stds_binned.statistic), 'bo', label='PF')
+    plt.plot(pts_binned.statistic, np.absolute(chs_masses_reldiff_stds_binned.statistic), 'mo', label='CHS')
+    plt.title('Mean truth pt vs. std relative difference in mass')
+    plt.xlabel(r'mean truth pt [GeV]')
+    plt.ylabel(r'std of $(mass_{reco} - mass_{truth})/mass_{truth}$')
+    plt.yscale('log')
+    plt.legend()
+    plt.savefig(savefigdir + 'mean_pt_v_std_mass.png')
+    plt.close()
+    
+
    #  %matplotlib inline
     #plt.style.use(hep.style.ROOT)
     fig = plt.figure(figsize=(10, 8))
     mass_diff = np.array([getattr(perf, "mass_diff")
                          for perf in performances_jet_pred0])
-    print(mass_diff)
     plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='blue', linewidth=linewidth,
              density=True, label=r'Semi-supervised, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
     mass_diff = np.array([getattr(perf, "mass_diff")
@@ -717,6 +1004,38 @@ def main(modelname, filelists, custom_args):
     plt.legend()
     plt.savefig(savefigdir + "Jet_mass_diff.pdf")
     plt.show()
+
+
+    fig = plt.figure(figsize=(10, 8))
+    mass_diff = np.array([getattr(perf, "mass_pred")
+                         for perf in performances_jet_pred0])
+    plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='blue', linewidth=linewidth,
+             density=True, label=r'Semi-supervised, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+    mass_diff = np.array([getattr(perf, "mass_pred")
+                         for perf in performances_jet_puppi])
+    plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='green', linewidth=linewidth, 
+             density=True, label=r'PUPPI, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+    mass_diff = np.array([getattr(perf, "mass_pred")
+                         for perf in performances_jet_puppi_wcut])
+    plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='red', linewidth=linewidth, 
+             density=True, label=r'PF, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+    mass_diff = np.array([getattr(perf, "mass_pred")
+                         for perf in performances_jet_CHS])
+    plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='orange', linewidth=linewidth, 
+             density=True, label=r'CHS, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+    mass_diff = np.array([getattr(perf, "mass_truth")
+                         for perf in performances_jet_pred0])
+    plt.hist(mass_diff, bins=40, range=(-1, 1), histtype='step', color='black', linewidth=linewidth, 
+             density=True, label=r'Truth, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(mass_diff)))+str(len(mass_diff)))
+    # plt.xlim(-1.0,1.3)
+    plt.xlabel(r"Jet Mass")
+    plt.ylabel('density')
+    plt.ylim(0, 3.6)
+    plt.rc('legend', fontsize=fontsize)
+    plt.legend()
+    plt.savefig(savefigdir + "Jet_mass_fit.pdf")
+    plt.show()
+    
 
     fig = plt.figure(figsize=(10, 8))
     njets_pf_total = np.array(njets_pf)
@@ -979,6 +1298,39 @@ def main(modelname, filelists, custom_args):
     plt.legend()
     plt.show()
     plt.savefig(savefigdir + "Jet_pT_diff.pdf")
+
+
+    fig = plt.figure(figsize=(10, 8))
+
+    pt_diff = np.array([getattr(perf, "pt_pred")
+                       for perf in performances_jet_pred0])
+    plt.hist(pt_diff, bins=40, range=(-0.3, 0.3), histtype='step', color='blue', linewidth=linewidth, 
+             density=True, label=r'Semi-supevised, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(pt_diff)))+str(len(pt_diff)))
+    pt_diff = np.array([getattr(perf, "pt_pred")
+                       for perf in performances_jet_puppi])
+    plt.hist(pt_diff, bins=40, range=(-0.3, 0.3), histtype='step', color='green', linewidth=linewidth, 
+             density=True, label=r'PUPPI, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(pt_diff)))+str(len(pt_diff)))
+    pt_diff = np.array([getattr(perf, "pt_pred")
+                       for perf in performances_jet_puppi_wcut])
+    plt.hist(pt_diff, bins=40, range=(-0.3, 0.3), histtype='step', color='red', linewidth=linewidth, 
+             density=True, label=r'PF, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(pt_diff)))+str(len(pt_diff)))
+    pt_diff = np.array([getattr(perf, "pt_pred")
+                       for perf in performances_jet_CHS])
+    plt.hist(pt_diff, bins=40, range=(-0.3, 0.3), histtype='step', color='orange', linewidth=linewidth, 
+             density=True, label=r'CHS, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(pt_diff)))+str(len(pt_diff)))
+    pt_diff = np.array([getattr(perf, "pt_truth")
+                       for perf in performances_jet_pred0])
+    plt.hist(pt_diff, bins=40, range=(-0.3, 0.3), histtype='step', color='black', linewidth=linewidth, 
+             density=True, label=r'Truth, $\mu={:10.3f}$, $\sigma={:10.3f}$, counts:'.format(*(getStat(pt_diff)))+str(len(pt_diff)))
+    # plt.xlim(0,40)
+    plt.ylim(0, 7)
+    plt.xlabel(r"Jet $p_{T}$")
+    plt.ylabel('density')
+    plt.rc('legend', fontsize=fontsize)
+    plt.legend()
+    plt.show()
+    plt.savefig(savefigdir + "Jet_pT_fit.pdf")
+    
 
     # MET resolution
     # %matplotlib inline

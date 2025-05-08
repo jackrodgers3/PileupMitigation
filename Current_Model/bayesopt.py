@@ -84,9 +84,9 @@ def arg_parse():
                         lr=0.0001,
                         pulevel=80,
                         lamb = 0.05,
-                        training_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925/data/dataset_graph_puppi_10000",
-                        validation_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925/data/dataset_graph_puppi_val_5000",
-                        save_dir=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925_focal/output_tuning/",
+                        training_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment020225/data/dataset_graph_puppi_10000",
+                        validation_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment020225/data/dataset_graph_puppi_val_5000",
+                        save_dir=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment020225/output_tuning/",
                         jet_type = "W",
                         num_select_LV = 7,
                         num_select_PU = 35,
@@ -163,7 +163,7 @@ def train(dataset, dataset_validation, trial, args):
 
     # wandb initialization
     wandb.init(
-        project='GraphPUPPI_focal_tuning',
+        project='GraphPUPPI_Zjets_focal_tuning',
         config=wandb_config
     )
 
@@ -851,7 +851,7 @@ def main():
     custom_arg.save_dir = args_end.save_dir
     modelname = args_end.save_dir + 'best_valid_model_'+s2+'.pt'
     if args_end.jet_type == "W":
-        filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925/data/dataset_graph_puppi_test_20000"]
+        filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment020225/data/dataset_graph_puppi_test_20000"]
     elif args_end.jet_type == "Z":
         filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset1_graph_puppi_test_1500",
         "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset2_graph_puppi_test_1500",

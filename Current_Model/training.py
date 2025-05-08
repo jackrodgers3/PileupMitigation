@@ -75,24 +75,24 @@ def arg_parse():
 
     parser.set_defaults(model_type='Gated',
                         num_enc_layers=5,
-                        num_dec_layers = 5,
+                        num_dec_layers = 3,
                         batch_size=1,
-                        hidden_dim=20,
-                        dropout=0,
+                        hidden_dim=64,
+                        dropout=0.05,
                         opt='adam',
                         weight_decay=0,
-                        lr=0.0001,
+                        lr=5.1e-4,
                         pulevel=80,
-                        lamb = 0.05,
+                        lamb = 7.4e-5,
                         training_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925/data/dataset_graph_puppi_10000",
                         validation_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925/data/dataset_graph_puppi_val_5000",
-                        save_dir=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925_focal/output_tuning/",
-                        jet_type = "W",
+                        save_dir=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment030925/binned_plots/WH/",
+                        jet_type = "Hbb",
                         num_select_LV = 7,
                         num_select_PU = 35,
-                        act_fn = 'relu',
-                        f_alpha = 0.1,
-                        f_gamma = 2.0
+                        act_fn = 'gelu',
+                        f_alpha = 0.9,
+                        f_gamma = 1.14
                         )
 
     return parser.parse_args()
@@ -114,6 +114,8 @@ def train(dataset, dataset_validation, args):
         os.mkdir(path)
 
     start = timer()
+    
+    rotate_mask = 9
     
     phym.Args().hidden_dim = args.hidden_dim
     phym.Args().dropout = args.dropout
@@ -144,8 +146,9 @@ def train(dataset, dataset_validation, args):
 
     # wandb initialization
     wandb.init(
-        project='GraphPUPPI_focal_training',
-        config=wandb_config
+        project='GraphPUPPI_W_base_inference',
+        config=wandb_config,
+        notes="W finetune"
     )
 
     generate_mask(dataset, rotate_mask, args.num_select_LV, args.num_select_PU)
@@ -164,8 +167,9 @@ def train(dataset, dataset_validation, args):
         model = nn.DataParallel(model)
     '''
     model = model.to(device)
+    model.load_state_dict(torch.load(r'/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925_focal/output_tuning/best_valid_model_44.pt'))
     opt = torch.optim.Adam(model.parameters(), lr = args.lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(opt, 15, gamma=0.999)
+    scheduler = torch.optim.lr_scheduler.StepLR(opt, 15, gamma=0.9999)
 
     # train
     #
@@ -798,52 +802,77 @@ def black_box_function():
 
 #Using Optuna
 def main():
-    black_box_function()
+    #black_box_function()
     
     custom_arg = Args()
     
+    args_end = arg_parse()
+
+    # load best model for respective inference data
+    args_end.jet_type = "Hbb"
+    inf = "W"
+    if inf == "W":
+        args_end.hidden_dim = 64
+        args_end.dropout = 0.046
+        args_end.lr = 5.1e-4
+        args_end.num_enc_layers = 5
+        args_end.num_dec_layers = 3
+        args_end.lamb = 7.4e-5
+        args_end.f_alpha = 0.9
+        args_end.f_gamma = 1.14
+        args_end.act_fn = 'gelu'
+        args_end.save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment030925/binned_plots/WW/"
+        mn = r'/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925_focal/output_tuning/best_valid_model_44.pt'
+    elif inf == "Z":
+        args_end.hidden_dim = 64
+        args_end.dropout = 0.03
+        args_end.lr = 6.7e-4
+        args_end.num_enc_layers = 3
+        args_end.num_dec_layers = 6
+        args_end.lamb = 6e-6
+        args_end.f_alpha = 0.883
+        args_end.f_gamma = 1.008
+        args_end.act_fn = 'relu'
+        args_end.save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment030925/binned_plots/WZ/"
+        mn = r'/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment020225/output_tuning/best_valid_model_47.pt'
+    elif inf == "Hbb":
+        args_end.hidden_dim = 256
+        args_end.dropout = 0.05
+        args_end.lr = 3.2e-5
+        args_end.num_enc_layers = 5
+        args_end.num_dec_layers = 2
+        args_end.lamb = 7.9e-5
+        args_end.f_alpha = 0.853
+        args_end.f_gamma = 1.01
+        args_end.act_fn = 'relu'
+        args_end.save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment030925/binned_plots/WH/"
+        mn = r'/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment012425/output_tuning/best_valid_model_44.pt'
+    
+    args_end.save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment030925/binned_plots_window/WZ/"
     #ONLY THING TO EDIT, REST IS PARAMETRIZED
-    custom_arg.hidden_dim = trial.params["hidden_dim"]
-    custom_arg.dropout = trial.params["dropout"]
-    custom_arg.lr = trial.params["lr"]
-    custom_arg.num_enc_layers = trial.params["num_enc_layers"]
-    custom_arg.num_dec_layers = trial.params["num_dec_layers"]
-    custom_arg.lamb = trial.params["lamb"]
-    custom_arg.f_alpha = trial.params["alpha"]
-    custom_arg.f_gamma = trial.params["gamma"]
+    custom_arg.hidden_dim = args_end.hidden_dim
+    custom_arg.dropout = args_end.dropout
+    custom_arg.lr = args_end.lr
+    custom_arg.num_enc_layers = args_end.num_enc_layers
+    custom_arg.num_dec_layers = args_end.num_dec_layers
+    custom_arg.lamb = args_end.lamb
+    custom_arg.f_alpha = args_end.f_alpha
+    custom_arg.f_gamma = args_end.f_gamma
+    custom_arg.act_fn = args_end.act_fn
+    custom_arg.save_dir = args_end.save_dir
     ##################
     
-    custom_arg.save_dir = args_end.save_dir
-    modelname = args_end.save_dir + 'best_valid_model_'+s2+'.pt'
+    modelname = mn
+    
     if args_end.jet_type == "W":
         filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925/data/dataset_graph_puppi_test_20000"]
     elif args_end.jet_type == "Z":
-        filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset1_graph_puppi_test_1500",
-        "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset2_graph_puppi_test_1500",
-        "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset4_graph_puppi_test_1500",
-        "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset5_graph_puppi_test_1500"]
+        filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment020225/data/dataset_graph_puppi_test_20000"]
     elif args_end.jet_type == "Hbb":
-        filelists = ["/depot/cms/users/jprodger/PUPPI/High_Volume_Datasets/Hbb/dataset9_graph_puppi_test_45004500"]
+        filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment012425/data/dataset_graph_puppi_test_20000"]
     phym.main(modelname, filelists, custom_arg)
-    mbotime = mend - mstart
-    print("main time " + str(mbotime))
-    fig1 = optuna.visualization.plot_optimization_history(study, target_name = 'loss performance')
-    fig2 = optuna.visualization.plot_param_importances(study)
-    fig3 = optuna.visualization.plot_edf(study, target_name = 'loss performance')
-    fig4 = optuna.visualization.plot_contour(study, params=['hidden_dim', 'dropout'])
-    fig5 = optuna.visualization.plot_contour(study, params=['num_select_PU', 'num_select_LV'])
-    fig6 = optuna.visualization.plot_contour(study, params=['lr', 'num_layers'])
-    fig7 = optuna.visualization.plot_contour(study, params=['lamb', 'num_select_LV'])
-    #fig4 = optuna.visualization.plot_pareto_front(study, target_names=["MU", "SIGMA"])
-    fig1.write_image(file = args_end.save_dir + "opt_history4var.png", format = 'png')
-    fig2.write_image(file = args_end.save_dir + "param_importances4var.png", format='png')
-    fig3.write_image(file = args_end.save_dir + "edf4var.png", format='png')
-    fig4.write_image(file = args_end.save_dir + "contour1.png", format='png')
-    fig5.write_image(file = args_end.save_dir + "contour2.png", format='png')
-    fig6.write_image(file = args_end.save_dir + "contour3.png", format='png')
-    fig7.write_image(file = args_end.save_dir + "contour4.png", format='png')
-    #fig4.write_image(file = args_end.save_dir + "pareto.png", format='png')
-
+    #mbotime = mend - mstart
+    #print("main time " + str(mbotime))
 '''
 def main():
     args = arg_parse()
