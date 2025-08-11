@@ -1,3 +1,3 @@
 # PileupMitigation
 Pileup mitigation project for research using GNN
-Basic code for model, utilities, training, testing physics metrics
+Including supervised model for comparison (needs work), most up-to-date code for main framework, and ablation studies
