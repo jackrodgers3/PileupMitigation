@@ -1,0 +1,11 @@
+act_fn: gelu
+alpha: 0.89924
+dropout: 0.046316
+gamma: 1.1385
+hidden_dim: 64
+lambda: 0.00007424
+lr: 0.00051311
+num_dec_layers: 3
+num_enc_layers: 5
+num_select_LV: 7
+num_select_PU: 35
