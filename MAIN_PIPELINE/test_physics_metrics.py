@@ -151,19 +151,19 @@ class Args(object):
         self.num_enc_layers = 3
         self.num_dec_layers = 3
         self.batch_size = 1
-        self.hidden_dim = 256
-        self.dropout = 0.05
+        self.hidden_dim = 384
+        self.dropout = 0.037735
         self.act_fn = 'gelu'
         self.opt = 'adam'
         self.weight_decay = 1e-4
-        self.lr = 1e-3
+        self.lr = 0.00048589
         self.do_boost = do_boost
         self.extralayers = extralayers
-        self.save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/output13/"
+        self.save_dir = r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/slime/"
         self.num_select_LV = 5
         self.num_select_PU = 25
-        self.lamb = 1e-3
-        self.f_alpha = 0.85
+        self.lamb = 0.000040844
+        self.f_alpha = 0.94219
         self.f_gamma = 1.0
 
 
@@ -1299,6 +1299,6 @@ def main(modelname, filelists, custom_args):
 
 if __name__ == '__main__':
     args = Args()
-    modelname = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/output13/best_valid_model.pt"
+    modelname = "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/slime/best_valid_model.pt"
     filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/data/total_dataset_graph_puppi_test_10000_slim3"]
     main(modelname, filelists, args)

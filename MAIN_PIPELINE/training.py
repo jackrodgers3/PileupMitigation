@@ -77,21 +77,21 @@ def arg_parse():
                         num_enc_layers=3,
                         num_dec_layers = 3,
                         batch_size=1,
-                        hidden_dim=256,
-                        dropout=0.05,
+                        hidden_dim=384,
+                        dropout=0.038,
                         opt='adam',
                         weight_decay=1e-4,
-                        lr=1e-3,
+                        lr=0.00048589,
                         pulevel=80,
-                        lamb = 1e-3,
+                        lamb = 0.000040844,
                         training_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/data/total_dataset_graph_puppi_10000_slim3",
                         validation_path=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/data/total_dataset_graph_puppi_val_10000_slim3",
-                        save_dir=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/output13/",
+                        save_dir=r"/depot/cms/users/jprodger/PUPPI/Physics_Optimization/MAIN_PIPELINE/slime/",
                         jet_type = "W",
                         num_select_LV = 5,
                         num_select_PU = 25,
                         act_fn = 'gelu',
-                        f_alpha = 0.85,
+                        f_alpha = 0.942,
                         f_gamma = 1.0
                         )
 
@@ -225,7 +225,7 @@ def train(dataset, dataset_validation, args):
     lowest_valid_loss = 1000.0
     batches_per_epoch = 1000
     accumulation_steps=1 # effective batch size
-    num_epochs = 18
+    num_epochs = 30
     step_counter = 0
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=int((num_epochs*batches_per_epoch)/accumulation_steps), eta_min=1e-6)
     while converge == False:
@@ -811,56 +811,6 @@ def tune():
     NUM_TRIALS = 50
     study = optuna.create_study(study_name='Bayesian Optimization with Optuna for Pileup Mitigation', storage='sqlite:///pm_W_tune.db', load_if_exists=True, direction="minimize")
     study.optimize(black_box_function, n_trials=NUM_TRIALS)
-
-'''
-#Using Optuna
-def main():
-    black_box_function()
-    
-    custom_arg = Args()
-    
-    #ONLY THING TO EDIT, REST IS PARAMETRIZED
-    custom_arg.hidden_dim = trial.params["hidden_dim"]
-    custom_arg.dropout = trial.params["dropout"]
-    custom_arg.lr = trial.params["lr"]
-    custom_arg.num_enc_layers = trial.params["num_enc_layers"]
-    custom_arg.num_dec_layers = trial.params["num_dec_layers"]
-    custom_arg.lamb = trial.params["lamb"]
-    custom_arg.f_alpha = trial.params["alpha"]
-    custom_arg.f_gamma = trial.params["gamma"]
-    ##################
-    
-    custom_arg.save_dir = args_end.save_dir
-    modelname = args_end.save_dir + 'best_valid_model_'+s2+'.pt'
-    if args_end.jet_type == "W":
-        filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/Experiment011925/data/dataset_graph_puppi_test_20000"]
-    elif args_end.jet_type == "Z":
-        filelists = ["/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset1_graph_puppi_test_1500",
-        "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset2_graph_puppi_test_1500",
-        "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset4_graph_puppi_test_1500",
-        "/depot/cms/users/jprodger/PUPPI/Physics_Optimization/PhysicsOpt49/Zjets/BigZData/dataset5_graph_puppi_test_1500"]
-    elif args_end.jet_type == "Hbb":
-        filelists = ["/depot/cms/users/jprodger/PUPPI/High_Volume_Datasets/Hbb/dataset9_graph_puppi_test_45004500"]
-    phym.main(modelname, filelists, custom_arg)
-    mbotime = mend - mstart
-    print("main time " + str(mbotime))
-    fig1 = optuna.visualization.plot_optimization_history(study, target_name = 'loss performance')
-    fig2 = optuna.visualization.plot_param_importances(study)
-    fig3 = optuna.visualization.plot_edf(study, target_name = 'loss performance')
-    fig4 = optuna.visualization.plot_contour(study, params=['hidden_dim', 'dropout'])
-    fig5 = optuna.visualization.plot_contour(study, params=['num_select_PU', 'num_select_LV'])
-    fig6 = optuna.visualization.plot_contour(study, params=['lr', 'num_layers'])
-    fig7 = optuna.visualization.plot_contour(study, params=['lamb', 'num_select_LV'])
-    #fig4 = optuna.visualization.plot_pareto_front(study, target_names=["MU", "SIGMA"])
-    fig1.write_image(file = args_end.save_dir + "opt_history4var.png", format = 'png')
-    fig2.write_image(file = args_end.save_dir + "param_importances4var.png", format='png')
-    fig3.write_image(file = args_end.save_dir + "edf4var.png", format='png')
-    fig4.write_image(file = args_end.save_dir + "contour1.png", format='png')
-    fig5.write_image(file = args_end.save_dir + "contour2.png", format='png')
-    fig6.write_image(file = args_end.save_dir + "contour3.png", format='png')
-    fig7.write_image(file = args_end.save_dir + "contour4.png", format='png')
-    #fig4.write_image(file = args_end.save_dir + "pareto.png", format='png')
-'''
 
 def main():
     args = arg_parse()

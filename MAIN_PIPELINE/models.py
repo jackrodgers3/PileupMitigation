@@ -173,24 +173,15 @@ class GNNStack(torch.nn.Module):
         conv_model = self.build_conv_model(args.model_type)
         self.convs = nn.ModuleList()
         self.convs.append(conv_model(input_dim, args.hidden_dim))
-        self.norm = pyg_nn.LayerNorm(args.hidden_dim, mode="node")
+        
         assert (args.num_enc_layers >= 1) or (args.num_dec_layers >= 1), 'Number of layers is not >=1'
         for l in range(args.num_enc_layers):
             self.convs.append(conv_model(args.hidden_dim, args.hidden_dim))
-
+        self.norms = nn.ModuleList([
+            pyg_nn.LayerNorm(args.hidden_dim, mode="node")
+            for _ in range(len(self.convs)) # or args.num_layers
+        ])
         # post-message-passing
-        '''
-        self.post_mp = []
-        self.post_da = []
-        for j in range(args.num_dec_layers):
-            self.post_mp.append(Block(args.hidden_dim, args.act_fn, args.dropout))
-            self.post_da.append(Block(args.hidden_dim, args.act_fn, args.dropout))
-        self.post_mp.append(nn.Linear(args.hidden_dim, output_dim))
-        self.post_da.append(nn.Linear(args.hidden_dim, output_dim))
-
-        self.post_mp = nn.Sequential(*self.post_mp)
-        self.post_da = nn.Sequential(*self.post_da)
-        '''
         
         self.post_mp = ResidualMLP(args.hidden_dim, args.hidden_dim, output_dim, args.num_dec_layers, args.act_fn, args.dropout, True)
         self.post_da = ResidualMLP(args.hidden_dim, args.hidden_dim, output_dim, args.num_dec_layers, args.act_fn, args.dropout, True)
@@ -235,24 +226,24 @@ class GNNStack(torch.nn.Module):
         #x[:, 0] = F.normalize(x[:, 0], dim=-1)
         # x = self.before_mp(x)
 
-        for i, layer in enumerate(self.convs):
+        for i, (layer, norm) in enumerate(zip(self.convs, self.norms)):
             # Store the 'identity' before the transformation
             identity = x 
             
             # Apply the GNN layer
             x = layer(x, edge_index, eta, phi)
-            x = self.norm(x)
-            x = F.gelu(x)
+            x = norm(x)
+            
             
             # Only add the residual if the dimensions match (from layer 1 onwards)
             if i > 0:
                 x = x + identity
-                
+            
+            x = F.gelu(x)
             x = F.dropout(x, self.dropout, training=self.training)
         
         x_cl = self.post_mp(x)
-        #x_da = torch.cat([x, x_cl.detach()], dim=-1) # change
-        #x_da = self.grl(x_da)
+        
         x_da = self.grl(x)
         x_da = self.post_da(x_da)
 
@@ -360,15 +351,24 @@ class Gated_model(pyg_nn.MessagePassing):
     def message(self, x_j, x_i, edge_index, size, x):
         self.node_count = torch.tensor(size[0]).type(torch.float32).to('cuda')
         # eta at position 0
+        '''
         dif_eta_phi = x_j[:, -2: x_j.size()[1]] - x_i[:, -2: x_i.size()[1]]
 
         # make sure delta within 2pi
+        
         indices = dif_eta_phi[:, 1] > pi
         temp = torch.ceil(
             (dif_eta_phi[:, 1][indices] - pi) / (2 * pi)) * (2 * pi)
         dif_eta_phi[:, 1][indices] = dif_eta_phi[:, 1][indices] - temp
-
         delta_r = torch.sum(torch.sqrt(dif_eta_phi ** 2), dim=1).reshape(-1, 1)
+        '''
+        deta = x_j[:, -2] - x_i[:, -2]
+        dphi = x_j[:, -1] - x_i[:, -1]
+
+        # wrap phi into [-pi, pi)
+        dphi = torch.remainder(dphi + pi, 2*pi) - pi
+        dif_eta_phi = torch.stack((deta, dphi), dim=1)
+        delta_r = torch.norm(dif_eta_phi, dim=1, keepdim=True)
 
         x = x[:, 0:-2]
         x_i = x_i[:, 0:-2]
